@@ -10,7 +10,7 @@ name = "q_core"
 crate-type = ["cdylib", "rlib"]
 
 [dependencies]
-pyo3 = { version = "0.24", features = ["extension-module"] }
+pyo3 = { version = "0.24", features = ["abi3-py312", "extension-module"] }
 q-engine = { path = "../q-engine" }
 q-io = { path = "../q-io" }
 q-buffers = { path = "../q-buffers" }
