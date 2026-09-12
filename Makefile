@@ -1,8 +1,23 @@
-.PHONY: contracts contracts-check wheel qt qt-test
+.PHONY: check fmt fmt-check lint test wheel wheel-test qt qt-test contracts contracts-check
 
 CONTRACTS_REPO ?= https://github.com/GuilhermeFortuna/q_contracts.git
 MATURIN ?= $(shell command -v maturin 2>/dev/null || echo "uvx maturin")
 QT_MINIMAL_DIR ?= $(shell find $(HOME)/.local/share/qt_minimal_download -name "QtCore" -type d 2>/dev/null | head -n 1)/../..
+
+check: fmt-check lint test wheel-test qt-test contracts-check
+	@echo "All workspace checks passed successfully."
+
+fmt:
+	cargo fmt --all
+
+fmt-check:
+	cargo fmt --all --check
+
+lint:
+	cargo clippy --workspace --all-targets -- -D warnings
+
+test:
+	cargo test --workspace
 
 contracts:
 	contracts_tmp="$$(mktemp -d)"; \
@@ -30,6 +45,9 @@ contracts-check:
 wheel:
 	rm -rf dist
 	$(MATURIN) build --release --out dist --manifest-path crates/q-py/Cargo.toml
+
+wheel-test: wheel
+	python3 tests/test_wheel.py
 
 qt:
 	cargo build -p q-qt
