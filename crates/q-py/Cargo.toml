@@ -1,0 +1,20 @@
+[package]
+name = "q-py"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+
+[lib]
+name = "q_core"
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+pyo3 = { version = "0.24", features = ["extension-module"] }
+q-engine = { path = "../q-engine" }
+q-io = { path = "../q-io" }
+q-buffers = { path = "../q-buffers" }
+q-indicators = { path = "../q-indicators" }
+
+[lints]
+workspace = true

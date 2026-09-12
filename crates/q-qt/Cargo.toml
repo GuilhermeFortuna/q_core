@@ -1,0 +1,26 @@
+[package]
+name = "q-qt"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+
+[lib]
+crate-type = ["staticlib", "rlib"]
+
+[dependencies]
+cxx = "1.0.142"
+cxx-qt = "0.10.0"
+cxx-qt-lib = "0.10.0"
+q-engine = { path = "../q-engine" }
+q-io = { path = "../q-io" }
+q-buffers = { path = "../q-buffers" }
+q-indicators = { path = "../q-indicators" }
+
+[build-dependencies]
+cxx-qt-build = { version = "0.10.0", features = ["link_qt_object_files"] }
+qt-build-utils = { version = "0.10.0", features = ["qt_minimal"] }
+qt-version = { version = "0.1.5", features = ["qt_version_at_least_6_5"] }
+
+[lints]
+workspace = true

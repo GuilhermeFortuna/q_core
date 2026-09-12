@@ -1,0 +1,13 @@
+[package]
+name = "q-engine"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+
+[dependencies]
+q-indicators = { path = "../q-indicators" }
+q-buffers = { path = "../q-buffers" }
+
+[lints]
+workspace = true

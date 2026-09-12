@@ -1,0 +1,12 @@
+[package]
+name = "q-io"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+
+[dependencies]
+q-buffers = { path = "../q-buffers" }
+
+[lints]
+workspace = true

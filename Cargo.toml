@@ -1,0 +1,24 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/q-indicators",
+    "crates/q-engine",
+    "crates/q-buffers",
+    "crates/q-io",
+    "crates/q-py",
+    "crates/q-qt",
+]
+
+[workspace.package]
+version = "2026.9.12"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+authors = ["Guilherme Fortuna <guilhermefortuna.dev@gmail.com>"]
+
+[workspace.lints.clippy]
+float_cmp = "deny"
+float_cmp_const = "deny"
+imprecise_flops = "deny"
+suboptimal_flops = "deny"
+disallowed_types = "deny"
+disallowed_methods = "deny"

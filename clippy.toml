@@ -1,0 +1,10 @@
+disallowed-types = [
+    { path = "std::time::Instant", reason = "determinism hazard: use deterministic simulation time instead" },
+    { path = "std::time::SystemTime", reason = "determinism hazard: use deterministic simulation time instead" },
+]
+disallowed-methods = [
+    { path = "std::time::Instant::now", reason = "determinism hazard: clock access is non-deterministic" },
+    { path = "std::time::SystemTime::now", reason = "determinism hazard: clock access is non-deterministic" },
+    { path = "std::env::var", reason = "purity hazard: environment access is non-deterministic" },
+    { path = "std::env::var_os", reason = "purity hazard: environment access is non-deterministic" },
+]
