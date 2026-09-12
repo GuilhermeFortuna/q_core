@@ -65,6 +65,17 @@ q-qt          ───►  q-engine, q-io, q-buffers, q-indicators
 
 ---
 
+## Prerequisites
+
+Building and testing `q_core` requires:
+- **Rust Toolchain**: 1.98.0 (pinned via `rust-toolchain.toml`), with `rustfmt` and `clippy`.
+- **C++ Compiler & Build Tools**: `g++` (C++17 support), `make`, `git`, `curl` (`build-essential` on Debian/Ubuntu).
+- **Python Toolchain**: Python 3.12+ and `uv` (for maturin release wheel builds and isolated virtualenv integration tests).
+- **Qt 6 Runtime Libraries**: If a system Qt 6 SDK is not installed, `qt-build-utils` / `cxx-qt` automatically downloads a minimal Qt 6 core runtime (`qt_minimal`). The downloaded runtime dynamically links:
+  - On Debian/Ubuntu: `libglib2.0-0t64` (or `libglib2.0-0`), `libdouble-conversion3`, and `libpcre2-16-0`.
+
+---
+
 ## Development and Validation
 
 The canonical check command runs format verification, linting, tests, wheel building, wheel integration test, Qt harness test, and contracts check:
