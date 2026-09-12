@@ -1,6 +1,7 @@
-.PHONY: contracts contracts-check
+.PHONY: contracts contracts-check wheel
 
 CONTRACTS_REPO ?= https://github.com/GuilhermeFortuna/q_contracts.git
+MATURIN ?= $(shell command -v maturin 2>/dev/null || echo "uvx maturin")
 
 contracts:
 	contracts_tmp="$$(mktemp -d)"; \
@@ -24,3 +25,7 @@ contracts-check:
 			--language rust --out "$$generated_tmp"; \
 	fi; \
 	diff -ru contracts "$$generated_tmp/rust"
+
+wheel:
+	rm -rf dist
+	$(MATURIN) build --release --out dist --manifest-path crates/q-py/Cargo.toml

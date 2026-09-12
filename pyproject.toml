@@ -1,0 +1,13 @@
+[build-system]
+requires = ["maturin>=1.5,<2.0"]
+build-backend = "maturin"
+
+[project]
+name = "q-core"
+version = "2026.9.12"
+description = "Deterministic computational core for Q"
+requires-python = ">=3.12"
+
+[tool.maturin]
+manifest-path = "crates/q-py/Cargo.toml"
+module-name = "q_core"
