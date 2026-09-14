@@ -94,3 +94,20 @@ make wheel-test       # Test installing and importing wheel in clean venv
 make qt-test          # Build q-qt static library and run C++ test harness
 make contracts-check  # Verify vendored contracts match clean regeneration
 ```
+
+### Local CI and Git hooks
+
+`make ci` (or `./scripts/ci.sh`) runs the same targets as `make check`, cheapest first, after a
+prerequisite preflight that names any missing tool or Qt runtime library. Locally it enters the host
+user `ci.slice` when available, lowers CPU/IO priority, and caps Cargo at half the logical CPUs
+(override with `CARGO_BUILD_JOBS=N`); with `CI` set it uses Cargo's defaults. Do not wrap the
+command in `systemd-run`.
+
+Install the Git hooks once per clone:
+
+```bash
+make hooks
+```
+
+- `pre-commit`: `make fmt-check`, plus `make lint` when Rust or Cargo files are staged.
+- `pre-push`: the full `./scripts/ci.sh` pipeline.
