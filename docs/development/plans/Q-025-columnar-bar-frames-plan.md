@@ -629,7 +629,7 @@ fn replay(file: &q_parity::fixture::FixtureFile) -> Result<WindowTrace, String>;
    equals `BACKEND_REV` and `environment` is `"backend"`. Run
    `make fixtures-backend-check` and confirm it is clean. Confirm that
    `make fixtures-check` (numeric families only) is unchanged. Commit.
-9. Add `q-parity` as a dev-dependency of `q-buffers`. Write
+9. [x] Add `q-parity` as a dev-dependency of `q-buffers`. Write
    `crates/q-buffers/tests/bar_window_gate.rs` with
    `bar_window_reference_gate` and `bar_window_double_run`. Before the window
    adapter is wired, `replay` returns an error, so confirm both tests fail

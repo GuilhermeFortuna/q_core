@@ -1261,6 +1261,7 @@ dependencies = [
 name = "q-buffers"
 version = "2026.9.12"
 dependencies = [
+ "q-parity",
  "serde",
  "serde_json",
 ]
