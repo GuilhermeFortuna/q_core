@@ -686,7 +686,7 @@ q-indicators  ───►  (none)            [dev: q-parity]
    in `fixtures/reference/indicators/rsi.json`, confirm it fails and shows that
    line, and revert. Replace `BACKEND_REV` with the previous `q_backend`
    commit, confirm it fails, and revert. Do not commit either change.
-- [ ] 8. Create `crates/q-parity` with `publish = false`, the workspace lints,
+- [x] 8. Create `crates/q-parity` with `publish = false`, the workspace lints,
    `#![forbid(unsafe_code)]`, `serde`, and `serde_json` with
    `float_roundtrip`. Add it to workspace members. Write failing tests in
    `fixture.rs`. `fnv1a64_float64` matches the two literals from step 4.

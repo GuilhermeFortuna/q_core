@@ -1285,6 +1285,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "q-parity"
+version = "2026.9.12"
+dependencies = [
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "q-py"
 version = "2026.9.12"
 dependencies = [
