@@ -778,7 +778,7 @@ q-indicators  ───►  (none)            [dev: q-parity]
    the exporter with `--backend-checkout --family indicators
    --allow-numeric-in-backend` into `/tmp/qb-fixtures`, and
    confirm `diff -ru` against `fixtures/reference` is empty.
-- [ ] 17. Human step, matching human-verifiable criterion 2: open `rsi.json` and
+- [x] 17. Human step, matching human-verifiable criterion 2: open `rsi.json` and
    locate the provenance, the `synthetic_ohlcv_n400/period=14` warm-up NaNs
    at indices 0 to 13, the `monotonic_up_n60/period=14` value `100.0`, and
    the `period=0` rejection.
