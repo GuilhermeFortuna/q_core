@@ -628,9 +628,9 @@ q-indicators  ───►  (none)            [dev: q-parity]
 
 ## Ordered implementation
 
-1. Work on the branch `Q-021-reference-fixtures-and-parity-gate` in `q_core`,
+- [x] 1. Work on the branch `Q-021-reference-fixtures-and-parity-gate` in `q_core`,
    created from `development` by `./work start`.
-2. Add `BACKEND_REV` with the current `q_backend` `origin/development` hash,
+- [x] 2. Add `BACKEND_REV` with the current `q_backend` `origin/development` hash,
    and add `tools/reference/pyproject.toml` pinning `numpy==2.4.4` and
    `pandas==3.0.2` with `uv.lock`. Write failing unittests in
    `test_export_reference.py`. `verify_environment` against a fake checkout
@@ -642,7 +642,7 @@ q-indicators  ───►  (none)            [dev: q-parity]
    they pass, and confirm `fetch_backend` against GitHub with the pinned
    hash yields a checkout containing `tests/backtesting/test_goldens.py`.
    Commit.
-3. Write failing unittests. `check_imports` accepts `technical_indicators.py`,
+- [ ] 3. Write failing unittests. `check_imports` accepts `technical_indicators.py`,
    `moving_averages.py`, `transforms.py`, and `leakage.py` from the fetched
    checkout. It rejects a source containing `import sqlalchemy` or
    `from q_core import compute_rsi`, and it accepts the same line inside
@@ -652,7 +652,7 @@ q-indicators  ───►  (none)            [dev: q-parity]
    `100.0 + np.random.default_rng(20240609).normal(0.0, 1.0, 400)[0]` exactly.
    A generator source referencing an undefined name raises `NameError`.
    Confirm they fail, implement, and confirm they pass. Commit.
-4. Write failing unittests for encoding and provenance. `cpu_feature_level()`
+- [ ] 4. Write failing unittests for encoding and provenance. `cpu_feature_level()`
    returns `x86-64-v4` for a fake cpuinfo with `avx512f avx512bw avx512cd
    avx512dq avx512vl` plus the v3 flags, and `x86-64-v3` without the AVX-512
    flags. `compare_trees` on two trees that differ by one ULP in an output
@@ -666,7 +666,7 @@ q-indicators  ───►  (none)            [dev: q-parity]
    finite value with identical bits. `dumps_fixture` is byte-identical across
    two calls, ends in a newline, and raises on a raw NaN. Confirm they fail,
    implement, and confirm they pass. Commit.
-5. Write failing unittests for cases. `run_case` for `compute_rsi` on
+- [ ] 5. Write failing unittests for cases. `run_case` for `compute_rsi` on
    `monotonic_up_n60` with period 14 gives NaN at indices 0 to 13 and `100.0`
    at 14. On `constant_n60` it gives all NaN. Period 0 gives
    `{"rejected": {"python_exception": "ZeroDivisionError"}}`. `rolling_rank`
@@ -677,16 +677,16 @@ q-indicators  ───►  (none)            [dev: q-parity]
    `function_specs()` has exactly the 16 ids. Confirm they fail. Implement
    `build_inputs`, `function_specs`, `run_case`, `check_reference_causal`, and
    `main`. Confirm they pass. Commit.
-6. Run `make fixtures`, which is added now, alongside `fixtures-check` and
+- [ ] 6. Run `make fixtures`, which is added now, alongside `fixtures-check` and
    `fixtures-test`. Run it a second time into a temp directory and confirm
    `diff -ru` is empty. Record the exporter wall-clock time, the case count
    per function, and the total bytes. Commit the fixtures alone, with the
    `BACKEND_REV` hash in the commit message.
-7. Verify the staleness check. `make fixtures-check` passes. Change one value
+- [ ] 7. Verify the staleness check. `make fixtures-check` passes. Change one value
    in `fixtures/reference/indicators/rsi.json`, confirm it fails and shows that
    line, and revert. Replace `BACKEND_REV` with the previous `q_backend`
    commit, confirm it fails, and revert. Do not commit either change.
-8. Create `crates/q-parity` with `publish = false`, the workspace lints,
+- [ ] 8. Create `crates/q-parity` with `publish = false`, the workspace lints,
    `#![forbid(unsafe_code)]`, `serde`, and `serde_json` with
    `float_roundtrip`. Add it to workspace members. Write failing tests in
    `fixture.rs`. `fnv1a64_float64` matches the two literals from step 4.
@@ -696,7 +696,7 @@ q-indicators  ───►  (none)            [dev: q-parity]
    `format` of `q-core-reference-fixture/2` gives `UnknownFormat`. A case
    referencing `missing.close` gives `DanglingInput`. Confirm they fail,
    implement, and confirm they pass. Commit.
-9. Write failing tests in `compare.rs`. Under
+- [ ] 9. Write failing tests in `compare.rs`. Under
    `AbsRelTol { abs: 1e-10, rel: 1e-12 }`, `[1.0]` against `[1.0 + 5e-11]`
    passes through the absolute bound. `[1.0]` against `[1.0 + 2e-10]` exceeds
    both bounds (the relative bound is `1e-12`) and fails with `Magnitude` at
@@ -712,82 +712,82 @@ q-indicators  ───►  (none)            [dev: q-parity]
    contains output, index, expected, and actual. Against the real fixtures,
    every case's expected outputs compared with themselves pass. Confirm they
    fail, implement, and confirm they pass. Commit.
-10. Write failing tests in `determinism.rs` and `causality.rs`, using the
-    `test.` kernels described in the decisions. The identity kernel passes
-    both. The call-counter kernel fails `check_double_run` at output `out`,
-    index 0. The next-bar kernel fails `check_prefix_causal` at index 0,
-    because `prefix(1)` has no next bar and gives NaN where the full run gives
-    `x[1]`, and it names both values. Confirm they fail, implement, and confirm
-    they pass. Commit.
-11. Write failing tests for the family mechanism. In Rust, a temp fixture root
-    with family `test_scenario` holds one file whose cases are
-    `{"steps": [{"op": "append", "times": <int64 column>, "close": <float64
-    column>}], "expected_after_each": [...]}` under `{"kind": "exact"}`.
-    `load_family` returns it with the policy `Exact`. `Column::from_json`
-    decodes both columns with verified checksums, and `check_accounting` with
-    the id neither bound nor pending gives `Unaccounted`.
-    `check_double_run_with` passes a closure that returns a fixed `Vec<i64>`
-    and fails a closure over the call counter. In Python, a registered test
-    family with `environment = "backend"` makes `main` exit 2 in the minimal
-    environment and name the family. `main --family indicators` with
-    `--backend-checkout` exits 2 when `detect_environment` reports
-    `"backend"`, unless `--allow-numeric-in-backend` is given, the flag human
-    criterion 1 uses. Confirm they fail, implement `load_family`,
-    `Column::from_json`, `check_accounting`, `check_double_run_with`,
-    `Family`, `FAMILIES`, and `detect_environment`, and confirm they pass.
-    Add `fixtures-backend` and `fixtures-backend-check` and confirm both
-    print the no-op message with `BACKEND_FAMILIES` empty. Commit.
-12. Write failing tests in `gate.rs` over an in-memory `ReferenceSet` of `test.`
-    fixtures, pinned rev `"a" * 40`:
-    - All bound and nothing pending passes.
-    - An empty binding table with an empty pending list gives one `Unaccounted`
-      per fixture.
-    - A function both bound and pending gives `PendingButBound`.
-    - A pending id with no fixture gives `PendingUnknown`.
-    - A binding with no fixture gives `BoundUnknown`.
-    - A fixture whose `backend_rev` is `"b" * 40` gives `ProvenanceRev`.
-    - The identity-plus-2e-10 kernel gives `Golden`.
-    - The next-bar kernel against next-bar expected outputs gives only
-      `NonCausal`.
-    - The counter kernel gives only `Nondeterministic`.
-    - A kernel returning `Ok` on a `rejected` case gives
-      `AcceptedRejectedCase`.
-    - A kernel returning `Err` on a computed case gives `UnexpectedError`.
-    - `parse_pending` rejects a duplicate id and ignores `#` lines.
-    - `summary()` starts with `reference gate: 1 bound, 0 pending, 1 failures`.
-    Confirm they fail, implement `run_gate`, and confirm they pass. Commit.
-13. Add `q-parity` as a dev-dependency of `q-indicators`, then add
-    `reference_pending.txt` with the 16 ids and `reference_gate.rs` with an
-    empty `BINDINGS`. Confirm `cargo test -p q-indicators --test
-    reference_gate -- --nocapture` prints `reference gate: 0 bound, 16
-    pending, 0 failures`. Delete the `rsi` line and confirm it fails with
-    `Unaccounted { function_id: "rsi" }`. Add a `vwap` line and confirm
-    `PendingUnknown`. Revert both. Commit.
-14. Add the `parity-isolation` target and extend `check` in the order given in
-    Interfaces. Confirm `make parity-isolation` passes. Add `q-parity` to
-    `q-py`'s `[dependencies]`, confirm it fails naming `q-py`, and revert.
-    Confirm `cargo test --workspace` passes with networking disabled
-    (`unshare -rn cargo test --workspace --offline`). Commit.
-15. Update `README.md` with the `q-parity` row, its dev-only edge in the
-    dependency direction, and a "Reference fixtures" section. The section
-    covers `BACKEND_REV`, `make fixtures`, `make fixtures-check`, what pending
-    means, and the Q-022 flip procedure: add a `Binding`, delete the pending
-    line, and run the gate. Add the "Reference fixture pins" section to
-    `q_contracts/COMPAT.md` on a `Q-021-reference-fixtures-and-parity-gate`
-    branch in `q_contracts`. Commit each.
-16. Human step, matching human-verifiable criterion 1: create a `q_backend`
-    worktree at `BACKEND_REV`, `uv sync --frozen` its full environment, run
-    the exporter with `--backend-checkout --family indicators
-    --allow-numeric-in-backend` into `/tmp/qb-fixtures`, and
-    confirm `diff -ru` against `fixtures/reference` is empty.
-17. Human step, matching human-verifiable criterion 2: open `rsi.json` and
-    locate the provenance, the `synthetic_ohlcv_n400/period=14` warm-up NaNs
-    at indices 0 to 13, the `monotonic_up_n60/period=14` value `100.0`, and
-    the `period=0` rejection.
-18. Human step, matching human-verifiable criterion 3: push the branch and
-    watch the CI run. Record the wall-clock time of the `make check` step
-    against the last `development` run.
-19. Run the full validation suite and commit. Report the handoff.
+- [ ] 10. Write failing tests in `determinism.rs` and `causality.rs`, using the
+   `test.` kernels described in the decisions. The identity kernel passes
+   both. The call-counter kernel fails `check_double_run` at output `out`,
+   index 0. The next-bar kernel fails `check_prefix_causal` at index 0,
+   because `prefix(1)` has no next bar and gives NaN where the full run gives
+   `x[1]`, and it names both values. Confirm they fail, implement, and confirm
+   they pass. Commit.
+- [ ] 11. Write failing tests for the family mechanism. In Rust, a temp fixture root
+   with family `test_scenario` holds one file whose cases are
+   `{"steps": [{"op": "append", "times": <int64 column>, "close": <float64
+   column>}], "expected_after_each": [...]}` under `{"kind": "exact"}`.
+   `load_family` returns it with the policy `Exact`. `Column::from_json`
+   decodes both columns with verified checksums, and `check_accounting` with
+   the id neither bound nor pending gives `Unaccounted`.
+   `check_double_run_with` passes a closure that returns a fixed `Vec<i64>`
+   and fails a closure over the call counter. In Python, a registered test
+   family with `environment = "backend"` makes `main` exit 2 in the minimal
+   environment and name the family. `main --family indicators` with
+   `--backend-checkout` exits 2 when `detect_environment` reports
+   `"backend"`, unless `--allow-numeric-in-backend` is given, the flag human
+   criterion 1 uses. Confirm they fail, implement `load_family`,
+   `Column::from_json`, `check_accounting`, `check_double_run_with`,
+   `Family`, `FAMILIES`, and `detect_environment`, and confirm they pass.
+   Add `fixtures-backend` and `fixtures-backend-check` and confirm both
+   print the no-op message with `BACKEND_FAMILIES` empty. Commit.
+- [ ] 12. Write failing tests in `gate.rs` over an in-memory `ReferenceSet` of `test.`
+   fixtures, pinned rev `"a" * 40`:
+   - All bound and nothing pending passes.
+   - An empty binding table with an empty pending list gives one `Unaccounted`
+     per fixture.
+   - A function both bound and pending gives `PendingButBound`.
+   - A pending id with no fixture gives `PendingUnknown`.
+   - A binding with no fixture gives `BoundUnknown`.
+   - A fixture whose `backend_rev` is `"b" * 40` gives `ProvenanceRev`.
+   - The identity-plus-2e-10 kernel gives `Golden`.
+   - The next-bar kernel against next-bar expected outputs gives only
+     `NonCausal`.
+   - The counter kernel gives only `Nondeterministic`.
+   - A kernel returning `Ok` on a `rejected` case gives
+     `AcceptedRejectedCase`.
+   - A kernel returning `Err` on a computed case gives `UnexpectedError`.
+   - `parse_pending` rejects a duplicate id and ignores `#` lines.
+   - `summary()` starts with `reference gate: 1 bound, 0 pending, 1 failures`.
+   Confirm they fail, implement `run_gate`, and confirm they pass. Commit.
+- [ ] 13. Add `q-parity` as a dev-dependency of `q-indicators`, then add
+   `reference_pending.txt` with the 16 ids and `reference_gate.rs` with an
+   empty `BINDINGS`. Confirm `cargo test -p q-indicators --test
+   reference_gate -- --nocapture` prints `reference gate: 0 bound, 16
+   pending, 0 failures`. Delete the `rsi` line and confirm it fails with
+   `Unaccounted { function_id: "rsi" }`. Add a `vwap` line and confirm
+   `PendingUnknown`. Revert both. Commit.
+- [ ] 14. Add the `parity-isolation` target and extend `check` in the order given in
+   Interfaces. Confirm `make parity-isolation` passes. Add `q-parity` to
+   `q-py`'s `[dependencies]`, confirm it fails naming `q-py`, and revert.
+   Confirm `cargo test --workspace` passes with networking disabled
+   (`unshare -rn cargo test --workspace --offline`). Commit.
+- [ ] 15. Update `README.md` with the `q-parity` row, its dev-only edge in the
+   dependency direction, and a "Reference fixtures" section. The section
+   covers `BACKEND_REV`, `make fixtures`, `make fixtures-check`, what pending
+   means, and the Q-022 flip procedure: add a `Binding`, delete the pending
+   line, and run the gate. Add the "Reference fixture pins" section to
+   `q_contracts/COMPAT.md` on a `Q-021-reference-fixtures-and-parity-gate`
+   branch in `q_contracts`. Commit each.
+- [ ] 16. Human step, matching human-verifiable criterion 1: create a `q_backend`
+   worktree at `BACKEND_REV`, `uv sync --frozen` its full environment, run
+   the exporter with `--backend-checkout --family indicators
+   --allow-numeric-in-backend` into `/tmp/qb-fixtures`, and
+   confirm `diff -ru` against `fixtures/reference` is empty.
+- [ ] 17. Human step, matching human-verifiable criterion 2: open `rsi.json` and
+   locate the provenance, the `synthetic_ohlcv_n400/period=14` warm-up NaNs
+   at indices 0 to 13, the `monotonic_up_n60/period=14` value `100.0`, and
+   the `period=0` rejection.
+- [ ] 18. Human step, matching human-verifiable criterion 3: push the branch and
+   watch the CI run. Record the wall-clock time of the `make check` step
+   against the last `development` run.
+- [ ] 19. Run the full validation suite and commit. Report the handoff.
 
 ## Validation
 
