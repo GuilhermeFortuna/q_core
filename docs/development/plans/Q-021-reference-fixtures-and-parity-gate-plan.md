@@ -677,12 +677,12 @@ q-indicators  ───►  (none)            [dev: q-parity]
    `function_specs()` has exactly the 16 ids. Confirm they fail. Implement
    `build_inputs`, `function_specs`, `run_case`, `check_reference_causal`, and
    `main`. Confirm they pass. Commit.
-- [ ] 6. Run `make fixtures`, which is added now, alongside `fixtures-check` and
+- [x] 6. Run `make fixtures`, which is added now, alongside `fixtures-check` and
    `fixtures-test`. Run it a second time into a temp directory and confirm
    `diff -ru` is empty. Record the exporter wall-clock time, the case count
    per function, and the total bytes. Commit the fixtures alone, with the
    `BACKEND_REV` hash in the commit message.
-- [ ] 7. Verify the staleness check. `make fixtures-check` passes. Change one value
+- [x] 7. Verify the staleness check. `make fixtures-check` passes. Change one value
    in `fixtures/reference/indicators/rsi.json`, confirm it fails and shows that
    line, and revert. Replace `BACKEND_REV` with the previous `q_backend`
    commit, confirm it fails, and revert. Do not commit either change.

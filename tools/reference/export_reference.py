@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import ast
+import difflib
 import importlib.metadata
 import importlib.util
 import json
@@ -389,6 +390,14 @@ def compare_trees(committed: Path, regenerated: Path) -> int:
 
         if comm_cpu == regen_cpu:
             sys.stderr.write(f"Byte mismatch in {rel_path} with matching cpu_level {comm_cpu}\n")
+            diff = difflib.unified_diff(
+                comm_file.read_text(encoding="utf-8").splitlines(keepends=True),
+                regen_file.read_text(encoding="utf-8").splitlines(keepends=True),
+                fromfile=f"committed/{rel_path}",
+                tofile=f"regenerated/{rel_path}",
+                n=3,
+            )
+            sys.stderr.writelines(diff)
             failed = True
             continue
 
