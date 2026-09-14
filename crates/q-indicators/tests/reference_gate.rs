@@ -16,7 +16,6 @@ fn param_i64(params: &Params, name: &str) -> Result<i64, KernelError> {
     }
 }
 
-#[allow(dead_code)] // used by clip / bollinger binders in later steps
 fn param_f64(params: &Params, name: &str) -> Result<f64, KernelError> {
     match params.get(name) {
         Some(ParamValue::Float(v)) => Ok(*v),
@@ -74,6 +73,44 @@ fn bind_ma_hma(inputs: &KernelInputs<'_>, params: &Params) -> Result<KernelOutpu
     bind_close_period(inputs, params, "ma_hma", q_indicators::hma)
 }
 
+fn bind_rolling_zscore(
+    inputs: &KernelInputs<'_>,
+    params: &Params,
+) -> Result<KernelOutputs, KernelError> {
+    let close = inputs.column("close")?;
+    let window = param_i64(params, "window")?;
+    let values = q_indicators::rolling_zscore(close, window).map_err(rejection)?;
+    Ok(single_out("rolling_zscore", values))
+}
+
+fn bind_rolling_rank(
+    inputs: &KernelInputs<'_>,
+    params: &Params,
+) -> Result<KernelOutputs, KernelError> {
+    let close = inputs.column("close")?;
+    let window = param_i64(params, "window")?;
+    let values = q_indicators::rolling_rank(close, window).map_err(rejection)?;
+    Ok(single_out("rolling_rank", values))
+}
+
+fn bind_pct_change(
+    inputs: &KernelInputs<'_>,
+    params: &Params,
+) -> Result<KernelOutputs, KernelError> {
+    let close = inputs.column("close")?;
+    let change_bars = param_i64(params, "change_bars")?;
+    let values = q_indicators::pct_change(close, change_bars).map_err(rejection)?;
+    Ok(single_out("pct_change", values))
+}
+
+fn bind_clip(inputs: &KernelInputs<'_>, params: &Params) -> Result<KernelOutputs, KernelError> {
+    let close = inputs.column("close")?;
+    let low = param_f64(params, "low")?;
+    let high = param_f64(params, "high")?;
+    let values = q_indicators::clip(close, low, high).map_err(rejection)?;
+    Ok(single_out("clip", values))
+}
+
 const BINDINGS: &[Binding] = &[
     Binding {
         function_id: "ma_sma",
@@ -94,6 +131,22 @@ const BINDINGS: &[Binding] = &[
     Binding {
         function_id: "ma_hma",
         kernel: bind_ma_hma,
+    },
+    Binding {
+        function_id: "rolling_zscore",
+        kernel: bind_rolling_zscore,
+    },
+    Binding {
+        function_id: "rolling_rank",
+        kernel: bind_rolling_rank,
+    },
+    Binding {
+        function_id: "pct_change",
+        kernel: bind_pct_change,
+    },
+    Binding {
+        function_id: "clip",
+        kernel: bind_clip,
     },
 ];
 const PENDING: &str = include_str!("reference_pending.txt");

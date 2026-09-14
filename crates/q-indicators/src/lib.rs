@@ -8,10 +8,12 @@ mod elementwise;
 mod error;
 mod ieee;
 mod moving_averages;
+mod transforms;
 mod window;
 
 pub use error::IndicatorError;
 pub use moving_averages::*;
+pub use transforms::*;
 
 /// The crate's build identity.
 pub const CRATE_NAME: &str = "q-indicators";
