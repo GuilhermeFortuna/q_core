@@ -766,7 +766,7 @@ q-indicators  ───►  (none)            [dev: q-parity]
    `q-py`'s `[dependencies]`, confirm it fails naming `q-py`, and revert.
    Confirm `cargo test --workspace` passes with networking disabled
    (`unshare -rn cargo test --workspace --offline`). Commit.
-- [ ] 15. Update `README.md` with the `q-parity` row, its dev-only edge in the
+- [x] 15. Update `README.md` with the `q-parity` row, its dev-only edge in the
    dependency direction, and a "Reference fixtures" section. The section
    covers `BACKEND_REV`, `make fixtures`, `make fixtures-check`, what pending
    means, and the Q-022 flip procedure: add a `Binding`, delete the pending
