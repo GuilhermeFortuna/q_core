@@ -521,10 +521,10 @@ Cargo.toml, pyproject.toml                    version -> release date
     pandas source. For realized volatility and Yang–Zhang, check the CPU feature
     level in the fixture provenance for the AVX-512 `log` cause. Record the
     cause for the handoff either way. Commit.
-- [ ] 12. Negative control for spec criterion 6: add a `mul_add` call in `window.rs`,
+- [x] 12. Negative control for spec criterion 6: add a `mul_add` call in `window.rs`,
     run `make lint`, and confirm it fails naming the disallowed method. Revert,
     and do not commit.
-- [ ] 13. Projection. Extend `tests/test_wheel.py` first, with these assertions:
+- [x] 13. Projection. Extend `tests/test_wheel.py` first, with these assertions:
     - Each of the 16 names exists on `q_core.indicators`, and `import
       q_core.indicators` works.
     - `pct_change(np.array([0., 1., 0., 0.]), 1)` equals `[nan, inf, -1, nan]`.

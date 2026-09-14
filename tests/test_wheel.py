@@ -48,17 +48,57 @@ print(f"wheel contracts_rev: {{c}}")
 assert v == {expected_version!r}, f"Version mismatch: {{v}} != {expected_version!r}"
 assert c == {expected_rev!r}, f"Contracts rev mismatch: {{c}} != {expected_rev!r}"
 
-x = np.array([1.0, 2.0, 3.0], dtype=np.float64)
-y = qi.identity(x)
-assert y.dtype == np.float64
-assert np.array_equal(y, x)
+names = [
+    "realized_vol", "yang_zhang", "rsi", "bollinger_bands", "macd",
+    "donchian_channels", "atr", "sma", "ema", "smma", "wma", "hma",
+    "rolling_zscore", "rolling_rank", "pct_change", "clip",
+]
+for name in names:
+    assert hasattr(qi, name), f"missing q_core.indicators.{{name}}"
+
+pct = qi.pct_change(np.array([0.0, 1.0, 0.0, 0.0], dtype=np.float64), 1)
+assert np.isnan(pct[0]) and np.isinf(pct[1]) and pct[1] > 0
+assert pct[2] == -1.0 and np.isnan(pct[3])
+
+sma = qi.sma(np.array([1.0, 2.0, 3.0], dtype=np.float64), 2)
+assert np.isnan(sma[0]) and sma[1] == 1.5 and sma[2] == 2.5
+
+rsi = qi.rsi(np.arange(1.0, 20.0, dtype=np.float64), 14)
+assert rsi[-1] == 100.0
+
+x = np.arange(1.0, 30.0, dtype=np.float64)
+x_before = x.copy()
+out_sma = qi.sma(x, 2)
+bb = qi.bollinger_bands(x, 20, 2.0)
+assert isinstance(bb, tuple) and len(bb) == 3
+dc = qi.donchian_channels(x + 1.0, x - 1.0, 10)
+assert isinstance(dc, tuple) and len(dc) == 2
+assert np.array_equal(x, x_before, equal_nan=True)
+assert not np.shares_memory(out_sma, x)
+assert not np.shares_memory(bb[0], x)
 
 try:
-    qi.identity(np.array([1, 2, 3], dtype=np.int64))
+    qi.rsi(x, 0)
+except ValueError as e:
+    assert "period" in str(e)
+else:
+    raise AssertionError("rsi(x, 0) must raise ValueError mentioning period")
+
+try:
+    qi.sma(np.array([1, 2, 3], dtype=np.int64), 2)
 except TypeError:
     pass
 else:
     raise AssertionError("int64 input must raise TypeError")
+
+try:
+    qi.sma(x[::2], 2)
+except ValueError:
+    pass
+else:
+    raise AssertionError("non-contiguous input must raise ValueError")
+
+print("indicator projection checks passed")
 """
         res = subprocess.run([str(python_bin), "-c", code], capture_output=True, text=True)
         if res.returncode != 0:
