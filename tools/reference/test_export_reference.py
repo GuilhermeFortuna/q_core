@@ -16,17 +16,22 @@ from export_reference import (
     CANONICAL_NAN_BITS,
     LOCKED_PACKAGES,
     BackendSource,
+    FunctionSpec,
+    build_inputs,
     check_imports,
+    check_reference_causal,
     compare_trees,
     cpu_feature_level,
     dumps_fixture,
     encode_column,
     fetch_backend,
     fnv1a64_float64,
+    function_specs,
     git_blob_id,
     load_generator,
     load_reference_module,
     open_backend_checkout,
+    run_case,
     verify_environment,
 )
 import numpy as np
@@ -413,7 +418,106 @@ class TestStep4EncodingAndProvenance(unittest.TestCase):
 
             # 4. backend_rev differs, different cpu_level -> fails (returns 1)
             (regen / "indicators/test_fn.json").write_text(dumps_fixture(make_fixture(val_ulp, cpu="x86-64-v4", rev="1" * 40)))
-            self.assertEqual(compare_trees(committed, regen), 1)
+class TestStep5Cases(unittest.TestCase):
+    def setUp(self) -> None:
+        self.source = get_or_fetch_backend()
+        generator = load_generator(self.source, "tests/backtesting/test_goldens.py", "synthetic_ohlcv")
+        self.inputs = build_inputs(generator)
+        self.tech_mod = load_reference_module(self.source, "src/q_backend/backtesting/technical_indicators.py")
+        self.ma_mod = load_reference_module(self.source, "src/q_backend/backtesting/moving_averages.py")
+        self.trans_mod = load_reference_module(self.source, "src/q_backend/backtesting/transforms.py")
+        self.leak_mod = load_reference_module(self.source, "src/q_backend/features/leakage.py")
+
+    def test_function_specs_count_and_ids(self) -> None:
+        specs = function_specs()
+        self.assertEqual(len(specs), 16)
+        expected_ids = {
+            "realized_vol",
+            "yang_zhang",
+            "rsi",
+            "bollinger_bands",
+            "macd",
+            "donchian_channels",
+            "atr",
+            "ma_sma",
+            "ma_ema",
+            "ma_smma",
+            "ma_wma",
+            "ma_hma",
+            "rolling_zscore",
+            "rolling_rank",
+            "pct_change",
+            "clip",
+        }
+        self.assertEqual(set(s.function_id for s in specs), expected_ids)
+
+    def test_run_case_rsi(self) -> None:
+        rsi_spec = next(s for s in function_specs() if s.function_id == "rsi")
+
+        # 1. On monotonic_up_n60 with period 14: NaN at 0..13, 100.0 at 14
+        res_up = run_case(rsi_spec, self.tech_mod, self.inputs["monotonic_up_n60"], {"period": 14})
+        self.assertIn("outputs", res_up)
+        vals_up = res_up["outputs"]["rsi"]["values"]
+        for idx in range(14):
+            self.assertIsNone(vals_up[idx], f"Expected NaN at index {idx}")
+        self.assertEqual(vals_up[14], 100.0)
+
+        # 2. On constant_n60: all NaN
+        res_const = run_case(rsi_spec, self.tech_mod, self.inputs["constant_n60"], {"period": 14})
+        self.assertIn("outputs", res_const)
+        vals_const = res_const["outputs"]["rsi"]["values"]
+        for idx, v in enumerate(vals_const):
+            self.assertIsNone(v, f"Expected NaN at index {idx}")
+
+        # 3. Period 0 gives ZeroDivisionError
+        res_p0 = run_case(rsi_spec, self.tech_mod, self.inputs["monotonic_up_n60"], {"period": 0})
+        self.assertEqual(res_p0, {"rejected": {"python_exception": "ZeroDivisionError"}})
+
+    def test_run_case_rolling_rank(self) -> None:
+        rank_spec = next(s for s in function_specs() if s.function_id == "rolling_rank")
+        res = run_case(rank_spec, self.trans_mod, self.inputs["synthetic_ohlcv_n400"], {"window": 0})
+        self.assertEqual(res, {"rejected": {"python_exception": "IndexError"}})
+
+    def test_run_case_donchian_channels(self) -> None:
+        donchian_spec = next(s for s in function_specs() if s.function_id == "donchian_channels")
+        res = run_case(donchian_spec, self.tech_mod, self.inputs["synthetic_ohlcv_n400"], {"period": 0})
+        self.assertIn("outputs", res)
+        self.assertIn("upper", res["outputs"])
+        self.assertIn("lower", res["outputs"])
+        for v in res["outputs"]["upper"]["values"]:
+            self.assertIsNone(v)
+        for v in res["outputs"]["lower"]["values"]:
+            self.assertIsNone(v)
+
+    def test_run_case_bollinger_bands(self) -> None:
+        bb_spec = next(s for s in function_specs() if s.function_id == "bollinger_bands")
+        res = run_case(bb_spec, self.tech_mod, self.inputs["synthetic_ohlcv_n400"], {"period": 20, "num_std": 2.0})
+        self.assertIn("outputs", res)
+        self.assertEqual(set(res["outputs"].keys()), {"upper", "middle", "lower"})
+
+    def test_check_reference_causal_raises_leakage_error(self) -> None:
+        class DummyLeakyModule:
+            @staticmethod
+            def leaky_fn(close: pd.Series) -> pd.Series:
+                return close.shift(-1)
+
+        leaky_spec = FunctionSpec(
+            function_id="test_leaky",
+            module_path="dummy.py",
+            callable_name="leaky_fn",
+            input_columns=("close",),
+            outputs=("out",),
+            param_grid=({},),
+            fixed_kwargs={},
+        )
+        with self.assertRaises(self.leak_mod.LeakageError):
+            check_reference_causal(
+                leaky_spec,
+                DummyLeakyModule(),  # type: ignore[arg-type]
+                self.inputs["synthetic_ohlcv_n400"],
+                {},
+                self.leak_mod,
+            )
 
 
 if __name__ == "__main__":

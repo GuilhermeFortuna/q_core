@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import argparse
 import ast
 import importlib.metadata
 import importlib.util
@@ -11,12 +12,13 @@ import platform
 import struct
 import subprocess
 import sys
+import tempfile
 import tomllib
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 from types import ModuleType
-from typing import Final
+from typing import Final, Literal, Protocol
 
 import numpy as np
 import pandas as pd
@@ -447,3 +449,119 @@ def compare_trees(committed: Path, regenerated: Path) -> int:
                     failed = True
 
     return 1 if failed else 0
+
+
+class Family(Protocol):
+    name: str  # subdirectory of the fixture root
+    environment: Literal["numeric", "backend"]  # "backend" = q_backend's full locked env at BACKEND_REV
+    policy: dict[str, object]  # envelope "policy"
+
+    def export(self, source: BackendSource, out_dir: Path) -> list[str]:
+        ...
+
+
+def detect_environment(source: BackendSource | None = None) -> Literal["numeric", "backend"]:
+    """Detect whether running in full backend environment or minimal numeric environment."""
+    try:
+        import q_backend  # noqa: F401
+
+        return "backend"
+    except ImportError:
+        return "numeric"
+
+
+from families.indicators import (  # noqa: E402
+    FunctionSpec,
+    IndicatorFamily,
+    build_inputs,
+    check_reference_causal,
+    function_specs,
+    run_case,
+)
+
+FAMILIES: Final[dict[str, Family]] = {
+    "indicators": IndicatorFamily(),
+}
+
+
+def main(argv: list[str] | None = None) -> int:
+    """CLI entry point for fixture exporter and tree comparator."""
+    if argv is None:
+        argv = sys.argv[1:]
+
+    if argv and argv[0] == "compare":
+        if len(argv) != 3:
+            sys.stderr.write("Usage: export_reference.py compare COMMITTED REGENERATED\n")
+            return 2
+        return compare_trees(Path(argv[1]), Path(argv[2]))
+
+    parser = argparse.ArgumentParser(description="Export reference fixtures from q_backend")
+    parser.add_argument("--family", action="append", dest="families", help="Family to export (repeatable)")
+    parser.add_argument(
+        "--backend-repo",
+        default="https://github.com/GuilhermeFortuna/q_backend.git",
+        help="Repository URL for q_backend",
+    )
+    parser.add_argument("--rev-file", default="BACKEND_REV", help="File containing backend commit hash")
+    parser.add_argument("--backend-checkout", help="Path to existing clean checkout of q_backend at rev")
+    parser.add_argument(
+        "--allow-numeric-in-backend",
+        action="store_true",
+        help="Allow running numeric families in backend environment",
+    )
+    parser.add_argument("--out", required=True, help="Output directory for reference fixtures")
+
+    args = parser.parse_args(argv)
+    out_dir = Path(args.out)
+
+    detected_env = detect_environment()
+
+    # Determine requested families
+    if args.families:
+        requested_families = args.families
+    else:
+        requested_families = [name for name, fam in FAMILIES.items() if fam.environment == detected_env]
+
+    # Validate family environments
+    for fam_name in requested_families:
+        if fam_name not in FAMILIES:
+            sys.stderr.write(f"Unknown family '{fam_name}'\n")
+            return 2
+        fam = FAMILIES[fam_name]
+        if fam.environment == "backend" and detected_env == "numeric":
+            sys.stderr.write(f"Family '{fam_name}' requires backend environment but running in numeric environment\n")
+            return 2
+        if fam.environment == "numeric" and detected_env == "backend" and not args.allow_numeric_in_backend:
+            sys.stderr.write(
+                f"Family '{fam_name}' is numeric-only; use --allow-numeric-in-backend to run in backend environment\n"
+            )
+            return 2
+
+    # Get revision
+    if args.rev_file:
+        rev_path = Path(args.rev_file)
+        if not rev_path.exists():
+            sys.stderr.write(f"Revision file '{args.rev_file}' not found\n")
+            return 2
+        rev = rev_path.read_text(encoding="utf-8").strip()
+    else:
+        sys.stderr.write("Revision file not specified\n")
+        return 2
+
+    if args.backend_checkout:
+        source = open_backend_checkout(Path(args.backend_checkout), rev)
+        verify_environment(source)
+        for fam_name in requested_families:
+            FAMILIES[fam_name].export(source, out_dir)
+    else:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            source = fetch_backend(args.backend_repo, rev, Path(tmpdir))
+            verify_environment(source)
+            for fam_name in requested_families:
+                FAMILIES[fam_name].export(source, out_dir)
+
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

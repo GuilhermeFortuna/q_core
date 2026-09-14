@@ -666,7 +666,7 @@ q-indicators  ───►  (none)            [dev: q-parity]
    finite value with identical bits. `dumps_fixture` is byte-identical across
    two calls, ends in a newline, and raises on a raw NaN. Confirm they fail,
    implement, and confirm they pass. Commit.
-- [ ] 5. Write failing unittests for cases. `run_case` for `compute_rsi` on
+- [x] 5. Write failing unittests for cases. `run_case` for `compute_rsi` on
    `monotonic_up_n60` with period 14 gives NaN at indices 0 to 13 and `100.0`
    at 14. On `constant_n60` it gives all NaN. Period 0 gives
    `{"rejected": {"python_exception": "ZeroDivisionError"}}`. `rolling_rank`
