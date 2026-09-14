@@ -72,11 +72,12 @@ q-parity      ───►  (none)
 
 `q_core` gates parity, determinism, and causality of its numerical kernels against reference fixtures generated from `q_backend`:
 - `BACKEND_REV`: Commit hash of `q_backend` pinned by this workspace for reference fixtures.
-- `fixtures/reference/`: Committed reference datasets (`inputs/`) and golden outputs (`indicators/`).
-- `make fixtures`: Exports reference fixtures from `q_backend` at `BACKEND_REV` using the pinned exporter environment (`tools/reference`).
-- `make fixtures-check`: Exports fixtures into a temporary directory and validates byte-for-byte reproducibility and provenance.
-- `make fixtures-backend` / `make fixtures-backend-check`: Export / verify fixtures requiring the full `q_backend` environment (`BACKEND_FAMILIES`).
+- `fixtures/reference/`: Committed reference datasets (`inputs/`), golden outputs (`indicators/`), and backend-family fixtures (`bar_window/`).
+- `make fixtures`: Exports numeric-family fixtures from `q_backend` at `BACKEND_REV` using the pinned exporter environment (`tools/reference`).
+- `make fixtures-check`: Regenerates numeric families into a temporary directory and compares those subtrees (not backend families).
+- `make fixtures-backend` / `make fixtures-backend-check`: Export / verify backend families (`BACKEND_FAMILIES`, currently `bar_window`) that require the full `q_backend` locked environment. Required locally before merging changes to `tools/reference/families/bar_window.py`, `fixtures/reference/bar_window/`, or `BACKEND_REV`. Not run in CI: the sync pulls multi-GB wheels (torch / nvidia-*), while every `cargo test` already fail-closes on a pin edit without regenerated fixtures via `ProvenanceRev`.
 - `make parity-isolation`: Confirms that `q-parity` is not included in the normal or build dependency tree of `q-py` or `q-qt`.
+- `make bench-bar-window`: Human measurement of `RollingBarWindow` vs pandas window ingest cost (not part of `make check`).
 
 ### Pending Fixtures and Kernel Implementation
 

@@ -676,24 +676,24 @@ fn replay(file: &q_parity::fixture::FixtureFile) -> Result<WindowTrace, String>;
     Python headers in use, and `make wheel` succeeds without Qt, as in Q-007
     step 8. Run `cargo tree -p q-buffers` and confirm it shows only `serde` and
     `serde_json`. Commit if a manifest change was needed.
-12. Add `tests/bench_bar_window.py` and a `bench-bar-window` target that builds
+12. [x] Add `tests/bench_bar_window.py` and a `bench-bar-window` target that builds
     the wheel and runs the script in a venv with numpy and pandas. The script
     runs five times: 10,000 one-bar ingests into a full 605-bar window through
     `RollingBarWindow.ingest_completed`, against the same through the
     evaluator's pandas sequence (`concat`, `duplicated(keep="last")`,
     `sort_index`, `iloc[-605:]`). It prints per-run and median microseconds per
     ingest for both. The target is not part of `make check`. Commit.
-13. Human step, matching human-verifiable criterion 1: run
+13. [x] Human step, matching human-verifiable criterion 1: run
     `make bench-bar-window` and record per-run and median figures for both
     paths.
-14. Human step, matching human-verifiable criterion 2: review the `q-buffers`
+14. [x] Human step, matching human-verifiable criterion 2: review the `q-buffers`
     docs against the strategy, genome and exit-rule columns listed in
     current-system context, and list any column without a supported type.
-15. Human step, matching human-verifiable criterion 3: in the full backend
+15. [x] Human step, matching human-verifiable criterion 3: in the full backend
     environment, run `make fixtures-backend-check` and confirm there is no
     diff. Record the wall-clock time. This is the local check that stands in
     for CI.
-16. Add the README fixture-protocol lines for `bar_window` (backend family;
+16. [x] Add the README fixture-protocol lines for `bar_window` (backend family;
     `fixtures-backend-check` required locally before merging changes to the
     family, its fixtures or `BACKEND_REV`; not run in CI, and why). Run
     `make check` and commit any fixes.

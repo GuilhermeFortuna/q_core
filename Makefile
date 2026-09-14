@@ -1,5 +1,6 @@
 .PHONY: check ci hooks fmt fmt-check lint test wheel wheel-test qt qt-test contracts contracts-check \
-	fixtures fixtures-check fixtures-backend fixtures-backend-check fixtures-test parity-isolation
+	fixtures fixtures-check fixtures-backend fixtures-backend-check fixtures-test parity-isolation \
+	bench-bar-window
 
 BACKEND_REPO ?= https://github.com/GuilhermeFortuna/q_backend.git
 CONTRACTS_REPO ?= https://github.com/GuilhermeFortuna/q_contracts.git
@@ -63,6 +64,13 @@ wheel:
 wheel-test: wheel
 	python3 tests/test_wheel.py
 	python3 tests/test_bar_frame.py
+
+bench-bar-window: wheel
+	@venv_dir="$$(mktemp -d)"; \
+	trap 'rm -rf "$$venv_dir"' EXIT; \
+	uv venv "$$venv_dir"; \
+	uv pip install --python "$$venv_dir/bin/python" dist/*.whl numpy pandas; \
+	"$$venv_dir/bin/python" tests/bench_bar_window.py
 
 qt:
 	cargo build -p q-qt
