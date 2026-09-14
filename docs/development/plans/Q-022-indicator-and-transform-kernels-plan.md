@@ -455,7 +455,7 @@ Cargo.toml, pyproject.toml                    version -> release date
    is the identity; a 40-element window-20 case matches the sequential literal
    computed in Python. Confirm they fail, implement, and confirm they pass.
    Commit.
-8. Bind and implement the moving averages. Bind `sma`, `ema`, `smma`, `wma`, and
+- [x] 8. Bind and implement the moving averages. Bind `sma`, `ema`, `smma`, `wma`, and
    `hma` as `ma_sma`, `ma_ema`, `ma_smma`, `ma_wma`, and `ma_hma` in
    `BINDINGS` in `reference_gate.rs`. Their `bind_ma_*` adapters call kernels
    that return `Ok(vec![f64::NAN; n])`. In the same change, delete those five
@@ -468,7 +468,7 @@ Cargo.toml, pyproject.toml                    version -> release date
    `hma(x, 1)` equals `x`; period 0 gives `InvalidParameter` for all five.
    Implement them. Confirm the unit tests and the gate pass for these five,
    including determinism and causality. Commit.
-9. Bind and implement the transforms the same way: add `rolling_zscore`,
+- [x] 9. Bind and implement the transforms the same way: add `rolling_zscore`,
    `rolling_rank`, `pct_change`, and `clip` stubs to `BINDINGS`, delete their
    lines from `reference_pending.txt`, and confirm the gate fails. Unit tests:
    - `rolling_rank([1, inf, 2, inf], 2)` is `[nan, 1.0, 0.5, 1.0]`.
@@ -483,7 +483,7 @@ Cargo.toml, pyproject.toml                    version -> release date
    - `clip(x, 3, 2)` is `InvalidBounds`.
 
    Implement them, and confirm the tests and the gate pass. Commit.
-10. Bind and implement the indicators the same way: add stubs for
+- [x] 10. Bind and implement the indicators the same way: add stubs for
     `realized_vol`, `yang_zhang`, `rsi`, `bollinger_bands`, `macd`,
     `donchian_channels`, and `atr` to `BINDINGS`, delete their lines from
     `reference_pending.txt` (leaving it with no ids), and confirm the gate
