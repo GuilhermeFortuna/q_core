@@ -652,7 +652,7 @@ q-indicators  ───►  (none)            [dev: q-parity]
    `100.0 + np.random.default_rng(20240609).normal(0.0, 1.0, 400)[0]` exactly.
    A generator source referencing an undefined name raises `NameError`.
    Confirm they fail, implement, and confirm they pass. Commit.
-- [ ] 4. Write failing unittests for encoding and provenance. `cpu_feature_level()`
+- [x] 4. Write failing unittests for encoding and provenance. `cpu_feature_level()`
    returns `x86-64-v4` for a fake cpuinfo with `avx512f avx512bw avx512cd
    avx512dq avx512vl` plus the v3 flags, and `x86-64-v3` without the AVX-512
    flags. `compare_trees` on two trees that differ by one ULP in an output

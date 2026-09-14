@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import io
+import json
+import struct
 import subprocess
 import sys
 import tempfile
@@ -15,7 +17,12 @@ from export_reference import (
     LOCKED_PACKAGES,
     BackendSource,
     check_imports,
+    compare_trees,
+    cpu_feature_level,
+    dumps_fixture,
+    encode_column,
     fetch_backend,
+    fnv1a64_float64,
     git_blob_id,
     load_generator,
     load_reference_module,
@@ -262,6 +269,151 @@ if TYPE_CHECKING:
             (tmp_path / "bad_sig.py").write_text("def bad_sig(x=undefined_name): pass\n", encoding="utf-8")
             with self.assertRaises(NameError):
                 load_generator(source, "bad_sig.py", "bad_sig")
+
+
+import math
+
+
+class TestStep4EncodingAndProvenance(unittest.TestCase):
+    def test_cpu_feature_level_fake_cpuinfo(self) -> None:
+        v4_cpuinfo = (
+            "flags : cx16 lahf_lm popcnt ssse3 sse4_1 sse4_2 avx avx2 bmi1 bmi2 f16c fma movbe abm "
+            "avx512f avx512bw avx512cd avx512dq avx512vl"
+        )
+        self.assertEqual(cpu_feature_level(v4_cpuinfo), "x86-64-v4")
+
+        v3_cpuinfo = "flags : cx16 lahf_lm popcnt ssse3 sse4_1 sse4_2 avx avx2 bmi1 bmi2 f16c fma movbe abm"
+        self.assertEqual(cpu_feature_level(v3_cpuinfo), "x86-64-v3")
+
+        v2_cpuinfo = "flags : cx16 lahf_lm popcnt ssse3 sse4_1 sse4_2"
+        self.assertEqual(cpu_feature_level(v2_cpuinfo), "x86-64-v2")
+
+    def test_fnv1a64_float64_known_literals(self) -> None:
+        self.assertEqual(fnv1a64_float64([]), 0xCBF29CE484222325)
+        self.assertEqual(
+            fnv1a64_float64([1.0, -0.0, float("nan"), float("inf")]),
+            0x892EAB94389F5CB0,
+        )
+        nan_alt = struct.unpack("<d", struct.pack("<Q", 0xFFF8000000000000))[0]
+        self.assertEqual(
+            fnv1a64_float64([nan_alt]),
+            fnv1a64_float64([float("nan")]),
+        )
+
+    def test_encode_column(self) -> None:
+        raw_vals = [float("nan"), float("inf"), float("-inf"), -0.0, 100.5]
+        col = encode_column(np.array(raw_vals))
+        self.assertEqual(col["dtype"], "float64")
+        self.assertIsNone(col["values"][0])
+        self.assertEqual(col["values"][1], "inf")
+        self.assertEqual(col["values"][2], "-inf")
+        self.assertEqual(col["values"][3], -0.0)
+        self.assertTrue(math.copysign(1.0, col["values"][3]) < 0)
+        self.assertEqual(col["values"][4], 100.5)
+        self.assertEqual(
+            col["bits_fnv1a64"],
+            f"0x{fnv1a64_float64(raw_vals):016x}",
+        )
+
+    def test_dumps_fixture(self) -> None:
+        payload = {"b": 2, "a": [1.0, None, -0.0, "inf"]}
+        s1 = dumps_fixture(payload)
+        s2 = dumps_fixture(payload)
+        self.assertEqual(s1, s2)
+        self.assertTrue(s1.endswith("\n"))
+        # Verify keys sorted
+        self.assertTrue(s1.index('"a"') < s1.index('"b"'))
+
+        # Roundtrip preservation of finite float bits
+        finite_val = 12345.678901234567
+        s = dumps_fixture({"val": finite_val})
+        loaded = json.loads(s)
+        self.assertEqual(
+            struct.pack("<d", finite_val),
+            struct.pack("<d", loaded["val"]),
+        )
+
+        # Raw NaN should raise ValueError
+        with self.assertRaises(ValueError):
+            dumps_fixture({"raw_nan": float("nan")})
+
+    def test_compare_trees(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmp = Path(tmpdir)
+            committed = tmp / "committed"
+            regen = tmp / "regen"
+            (committed / "indicators").mkdir(parents=True)
+            (committed / "inputs").mkdir(parents=True)
+            (regen / "indicators").mkdir(parents=True)
+            (regen / "inputs").mkdir(parents=True)
+
+            val_orig = 100.0
+            bits_orig = struct.unpack("<Q", struct.pack("<d", val_orig))[0]
+            val_ulp = struct.unpack("<d", struct.pack("<Q", bits_orig + 1))[0]
+
+            def make_input(val: float, rev: str = "0" * 40) -> dict[str, object]:
+                return {
+                    "format": "q-core-reference-fixture/1",
+                    "input_id": "test_input",
+                    "provenance": {
+                        "backend_repo": "https://example.com/repo.git",
+                        "backend_rev": rev,
+                        "exporter": "tools/reference/export_reference.py",
+                    },
+                    "columns": {
+                        "close": encode_column([val]),
+                    },
+                }
+
+            def make_fixture(val: float, cpu: str = "x86-64-v3", rev: str = "0" * 40) -> dict[str, object]:
+                return {
+                    "format": "q-core-reference-fixture/1",
+                    "family": "indicators",
+                    "fixture_id": "test_fn",
+                    "policy": {"kind": "abs_rel_tol", "abs": 1e-10, "rel": 1e-12},
+                    "provenance": {
+                        "backend_repo": "https://example.com/repo.git",
+                        "backend_rev": rev,
+                        "cpu_level": cpu,
+                        "environment": "numeric",
+                    },
+                    "cases": [
+                        {
+                            "case_id": "c1",
+                            "inputs": {"close": "test_input.close"},
+                            "params": {"period": 14},
+                            "expected": {
+                                "outputs": {
+                                    "rsi": encode_column([val]),
+                                }
+                            },
+                        }
+                    ],
+                }
+
+            # 1. Output differs by 1 ULP, same cpu_level -> fails (returns 1)
+            (committed / "inputs/test_input.json").write_text(dumps_fixture(make_input(val_orig)))
+            (regen / "inputs/test_input.json").write_text(dumps_fixture(make_input(val_orig)))
+            (committed / "indicators/test_fn.json").write_text(dumps_fixture(make_fixture(val_orig, cpu="x86-64-v3")))
+            (regen / "indicators/test_fn.json").write_text(dumps_fixture(make_fixture(val_ulp, cpu="x86-64-v3")))
+
+            self.assertEqual(compare_trees(committed, regen), 1)
+
+            # 2. Output differs by 1 ULP, different cpu_level -> passes (returns 0)
+            (regen / "indicators/test_fn.json").write_text(dumps_fixture(make_fixture(val_ulp, cpu="x86-64-v4")))
+            self.assertEqual(compare_trees(committed, regen), 0)
+
+            # 3. Input differs by 1 ULP, different cpu_level -> fails (returns 1)
+            (regen / "inputs/test_input.json").write_text(dumps_fixture(make_input(val_ulp)))
+            self.assertEqual(compare_trees(committed, regen), 1)
+
+            # Revert input
+            (regen / "inputs/test_input.json").write_text(dumps_fixture(make_input(val_orig)))
+            self.assertEqual(compare_trees(committed, regen), 0)
+
+            # 4. backend_rev differs, different cpu_level -> fails (returns 1)
+            (regen / "indicators/test_fn.json").write_text(dumps_fixture(make_fixture(val_ulp, cpu="x86-64-v4", rev="1" * 40)))
+            self.assertEqual(compare_trees(committed, regen), 1)
 
 
 if __name__ == "__main__":
