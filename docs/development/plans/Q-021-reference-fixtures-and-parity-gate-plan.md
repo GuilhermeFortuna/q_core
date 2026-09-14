@@ -642,7 +642,7 @@ q-indicators  ───►  (none)            [dev: q-parity]
    they pass, and confirm `fetch_backend` against GitHub with the pinned
    hash yields a checkout containing `tests/backtesting/test_goldens.py`.
    Commit.
-- [ ] 3. Write failing unittests. `check_imports` accepts `technical_indicators.py`,
+- [x] 3. Write failing unittests. `check_imports` accepts `technical_indicators.py`,
    `moving_averages.py`, `transforms.py`, and `leakage.py` from the fetched
    checkout. It rejects a source containing `import sqlalchemy` or
    `from q_core import compute_rsi`, and it accepts the same line inside

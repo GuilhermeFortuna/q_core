@@ -2,13 +2,20 @@
 
 from __future__ import annotations
 
+import ast
 import importlib.metadata
+import importlib.util
 import subprocess
 import sys
 import tomllib
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
+from types import ModuleType
 from typing import Final
+
+import numpy as np
+import pandas as pd
 
 FORMAT: Final = "q-core-reference-fixture/1"
 ABS_TOL: Final = 1e-10
@@ -100,3 +107,84 @@ def verify_environment(source: BackendSource) -> dict[str, str]:
             sys.exit(2)
         result[pkg_name] = installed_ver
     return result
+
+
+def _is_type_checking_guard(test_node: ast.expr) -> bool:
+    if isinstance(test_node, ast.Name) and test_node.id == "TYPE_CHECKING":
+        return True
+    if isinstance(test_node, ast.Attribute) and test_node.attr == "TYPE_CHECKING":
+        return True
+    return False
+
+
+def check_imports(module_source: str, rel_path: str) -> None:
+    """Verify that module imports only stdlib, numpy, and pandas outside TYPE_CHECKING."""
+    tree = ast.parse(module_source, filename=rel_path)
+    allowed = set(sys.stdlib_module_names) | {"numpy", "pandas"}
+
+    def walk_stmts(stmts: list[ast.stmt]) -> None:
+        for stmt in stmts:
+            if isinstance(stmt, ast.If):
+                if _is_type_checking_guard(stmt.test):
+                    walk_stmts(stmt.orelse)
+                else:
+                    walk_stmts(stmt.body)
+                    walk_stmts(stmt.orelse)
+            elif isinstance(stmt, ast.Try):
+                walk_stmts(stmt.body)
+                for handler in stmt.handlers:
+                    walk_stmts(handler.body)
+                walk_stmts(stmt.orelse)
+                walk_stmts(stmt.finalbody)
+            elif isinstance(stmt, ast.Import):
+                for alias in stmt.names:
+                    top = alias.name.split(".")[0]
+                    if top not in allowed:
+                        raise ValueError(f"Disallowed import '{alias.name}' in {rel_path}")
+            elif isinstance(stmt, ast.ImportFrom):
+                if stmt.level == 0 and stmt.module:
+                    top = stmt.module.split(".")[0]
+                    if top not in allowed:
+                        raise ValueError(f"Disallowed import from '{stmt.module}' in {rel_path}")
+                elif stmt.level > 0:
+                    raise ValueError(f"Disallowed relative import in {rel_path}")
+
+    walk_stmts(tree.body)
+
+
+def load_reference_module(source: BackendSource, rel_path: str) -> ModuleType:
+    """Load a reference module by file path after verifying its imports."""
+    file_path = source.checkout / rel_path
+    source_code = file_path.read_text(encoding="utf-8")
+    check_imports(source_code, rel_path)
+    module_name = f"_reference_{Path(rel_path).stem}"
+    spec = importlib.util.spec_from_file_location(module_name, file_path)
+    if spec is None or spec.loader is None:
+        raise ImportError(f"Could not create spec for {file_path}")
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[module_name] = module
+    spec.loader.exec_module(module)
+    return module
+
+
+def load_generator(source: BackendSource, rel_path: str, name: str) -> Callable[..., pd.DataFrame]:
+    """Extract a generator function by AST and execute in a namespace with only np and pd."""
+    file_path = source.checkout / rel_path
+    content = file_path.read_text(encoding="utf-8")
+    tree = ast.parse(content, filename=rel_path)
+    fn_node: ast.FunctionDef | None = None
+    for node in tree.body:
+        if isinstance(node, ast.FunctionDef) and node.name == name:
+            fn_node = node
+            break
+    if fn_node is None:
+        raise ValueError(f"Function '{name}' not found in {rel_path}")
+    mod = ast.Module(body=[fn_node], type_ignores=[])
+    ast.fix_missing_locations(mod)
+    code = compile(mod, filename=rel_path, mode="exec")
+    ns: dict[str, object] = {"np": np, "pd": pd}
+    exec(code, ns)
+    fn = ns[name]
+    if not callable(fn):
+        raise TypeError(f"Extracted object '{name}' is not callable")
+    return fn
