@@ -1,0 +1,18 @@
+# Reference parity gate: pending indicator functions
+# Functions will be bound as their implementations land in Q-022
+atr
+bollinger_bands
+clip
+donchian_channels
+ma_ema
+ma_hma
+ma_sma
+ma_smma
+ma_wma
+macd
+pct_change
+realized_vol
+rolling_rank
+rolling_zscore
+rsi
+yang_zhang

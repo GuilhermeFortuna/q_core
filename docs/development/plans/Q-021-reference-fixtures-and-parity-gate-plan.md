@@ -754,7 +754,7 @@ q-indicators  ───►  (none)            [dev: q-parity]
    - `parse_pending` rejects a duplicate id and ignores `#` lines.
    - `summary()` starts with `reference gate: 1 bound, 0 pending, 1 failures`.
    Confirm they fail, implement `run_gate`, and confirm they pass. Commit.
-- [ ] 13. Add `q-parity` as a dev-dependency of `q-indicators`, then add
+- [x] 13. Add `q-parity` as a dev-dependency of `q-indicators`, then add
    `reference_pending.txt` with the 16 ids and `reference_gate.rs` with an
    empty `BINDINGS`. Confirm `cargo test -p q-indicators --test
    reference_gate -- --nocapture` prints `reference gate: 0 bound, 16

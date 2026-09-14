@@ -1276,6 +1276,9 @@ dependencies = [
 [[package]]
 name = "q-indicators"
 version = "2026.9.12"
+dependencies = [
+ "q-parity",
+]
 
 [[package]]
 name = "q-io"
