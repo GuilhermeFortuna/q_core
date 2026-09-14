@@ -429,9 +429,79 @@ pub(crate) fn rolling_min(values: &[f64], window: usize) -> Vec<f64> {
     rolling_min_max(values, window, false)
 }
 
+/// Pandas `aggregations.ewm` with `adjust=False`, `ignore_na=False`, `normalize=True`,
+/// over a single full-series window. Does **not** raise `min_periods` to 1 (unlike `roll_var`).
+pub(crate) fn ewm_mean(values: &[f64], com: f64, min_periods: usize) -> Vec<f64> {
+    let n = values.len();
+    let mut output = vec![f64::NAN; n];
+    if n == 0 {
+        return output;
+    }
+    let values = prep_values(values);
+
+    let alpha = 1.0 / (1.0 + com);
+    let old_wt_factor = 1.0 - alpha;
+    // adjust=False → new_wt starts as alpha (may be overwritten when com == 1).
+    let mut new_wt = alpha;
+
+    let mut weighted = values[0];
+    let mut is_observation = ieee_eq(weighted, weighted);
+    let mut nobs: usize = usize::from(is_observation);
+    output[0] = if nobs >= min_periods {
+        weighted
+    } else {
+        f64::NAN
+    };
+    let mut old_wt = 1.0;
+
+    for i in 1..n {
+        let cur = values[i];
+        is_observation = ieee_eq(cur, cur);
+        nobs += usize::from(is_observation);
+
+        if ieee_eq(weighted, weighted) {
+            // ignore_na=False ⇒ always enter (decay even on missing).
+            old_wt *= old_wt_factor;
+            if is_observation {
+                // avoid numerical errors on constant series
+                if !ieee_eq(weighted, cur) {
+                    if ieee_eq(com, 1.0) {
+                        new_wt = 1.0 - old_wt;
+                    }
+                    weighted = ewm_fuse_update(old_wt, weighted, new_wt, cur);
+                }
+                // adjust=False
+                old_wt = 1.0;
+            }
+        } else if is_observation {
+            weighted = cur;
+        }
+
+        output[i] = if nobs >= min_periods {
+            weighted
+        } else {
+            f64::NAN
+        };
+    }
+
+    output
+}
+
+/// Unfused `old_wt * weighted + new_wt * cur` then divide by `(old_wt + new_wt)`.
+#[expect(
+    clippy::suboptimal_flops,
+    reason = "pandas evaluates a*b+c unfused; mul_add changes the result bits"
+)]
+fn ewm_fuse_update(old_wt: f64, weighted: f64, new_wt: f64, cur: f64) -> f64 {
+    let mut out = old_wt * weighted + new_wt * cur;
+    out /= old_wt + new_wt;
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::ieee::{com_from_alpha_period, com_from_span};
 
     fn assert_bits_eq(actual: &[f64], expected: &[f64]) {
         assert_eq!(actual.len(), expected.len(), "length mismatch");
@@ -546,5 +616,39 @@ mod tests {
         let lower = crate::elementwise::shift(&rolling_min(&low, 2), 1);
         assert_bits_eq(&upper, &[f64::NAN, f64::NAN, 3.0, 3.0, 5.0]);
         assert_bits_eq(&lower, &[f64::NAN, f64::NAN, 0.0, 1.0, 1.0]);
+    }
+
+    #[test]
+    fn ewm_mean_smma_period2_with_nan() {
+        let com = com_from_alpha_period(2);
+        let got = ewm_mean(&[1.0, f64::NAN, 3.0, 4.0], com, 0);
+        assert_bits_eq(&got, &[1.0, 1.0, 2.5, 3.25]);
+    }
+
+    #[test]
+    fn ewm_mean_ema_span4_with_nan() {
+        let com = com_from_span(4);
+        let got = ewm_mean(&[1.0, f64::NAN, 3.0, 4.0], com, 0);
+        assert_bits_eq(&got, &[1.0, 1.0, 2.0526315789473686, 2.8315789473684214]);
+    }
+
+    #[test]
+    fn ewm_mean_span3_equals_smma_period2() {
+        let smma = ewm_mean(&[1.0, f64::NAN, 3.0, 4.0], com_from_alpha_period(2), 0);
+        let span3 = ewm_mean(&[1.0, f64::NAN, 3.0, 4.0], com_from_span(3), 0);
+        assert_bits_eq(&smma, &span3);
+    }
+
+    #[test]
+    fn ewm_mean_leading_nans_stay_until_first_obs() {
+        let got = ewm_mean(&[f64::NAN, f64::NAN, 1.0, 2.0], com_from_span(3), 0);
+        assert_bits_eq(&got, &[f64::NAN, f64::NAN, 1.0, 1.5]);
+    }
+
+    #[test]
+    fn ewm_mean_inf_carried_like_nan() {
+        let with_nan = ewm_mean(&[1.0, f64::NAN, 3.0, 4.0], com_from_alpha_period(2), 0);
+        let with_inf = ewm_mean(&[1.0, f64::INFINITY, 3.0, 4.0], com_from_alpha_period(2), 0);
+        assert_bits_eq(&with_inf, &with_nan);
     }
 }
