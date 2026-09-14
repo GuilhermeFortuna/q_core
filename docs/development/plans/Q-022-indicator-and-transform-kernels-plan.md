@@ -559,7 +559,7 @@ Cargo.toml, pyproject.toml                    version -> release date
 - [ ] 18. Human step, matching human-verifiable criterion 1: after merging, adjust the
     version date if needed, tag `vYYYY.MM.DD`, push the tag, and resolve and
     call the wheel from the tag in a clean environment.
-- [ ] 19. Run the full validation suite, `make check`, and confirm it passes. Commit
+- [x] 19. Run the full validation suite, `make check`, and confirm it passes. Commit
     any fixes.
 
 ## Validation
