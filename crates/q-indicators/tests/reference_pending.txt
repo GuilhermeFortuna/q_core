@@ -1,9 +1,2 @@
 # Reference parity gate: pending indicator functions
-# Functions will be bound as their implementations land in Q-022
-atr
-bollinger_bands
-donchian_channels
-macd
-realized_vol
-rsi
-yang_zhang
+# All Q-022 indicator kernels are bound; no function ids remain pending.

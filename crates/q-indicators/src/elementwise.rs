@@ -12,7 +12,6 @@ pub(crate) fn shift(values: &[f64], lag: usize) -> Vec<f64> {
 }
 
 /// First difference: `out[0] = NaN`, `out[i] = values[i] - values[i - 1]`.
-#[allow(dead_code)] // used by rsi / atr in the indicators step
 pub(crate) fn diff(values: &[f64]) -> Vec<f64> {
     if values.is_empty() {
         return Vec::new();
@@ -25,7 +24,6 @@ pub(crate) fn diff(values: &[f64]) -> Vec<f64> {
 }
 
 /// Pandas `Series.clip(lower=low)`: NaN stays NaN; `x >= low ? x : low` keeps `-0.0`.
-#[allow(dead_code)] // used by rsi in the indicators step
 pub(crate) fn clip_lower(values: &[f64], low: f64) -> Vec<f64> {
     values
         .iter()

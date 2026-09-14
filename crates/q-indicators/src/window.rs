@@ -1,8 +1,5 @@
 //! Pandas FixedWindowIndexer rolling primitives (mean, var, std).
-//!
-//! Remaining `pub(crate)` helpers are wired by transforms/indicators in later steps.
 
-#![allow(dead_code)]
 #![allow(clippy::needless_range_loop)]
 
 use crate::ieee::{ieee_eq, window_missing};

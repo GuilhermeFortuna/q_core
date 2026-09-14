@@ -111,6 +111,88 @@ fn bind_clip(inputs: &KernelInputs<'_>, params: &Params) -> Result<KernelOutputs
     Ok(single_out("clip", values))
 }
 
+fn bind_realized_vol(
+    inputs: &KernelInputs<'_>,
+    params: &Params,
+) -> Result<KernelOutputs, KernelError> {
+    let close = inputs.column("close")?;
+    let window = param_i64(params, "window")?;
+    let periods_per_year = param_i64(params, "periods_per_year")?;
+    let values = q_indicators::realized_vol(close, window, periods_per_year).map_err(rejection)?;
+    Ok(single_out("realized_vol", values))
+}
+
+fn bind_yang_zhang(
+    inputs: &KernelInputs<'_>,
+    params: &Params,
+) -> Result<KernelOutputs, KernelError> {
+    let open = inputs.column("open")?;
+    let high = inputs.column("high")?;
+    let low = inputs.column("low")?;
+    let close = inputs.column("close")?;
+    let window = param_i64(params, "window")?;
+    let periods_per_year = param_i64(params, "periods_per_year")?;
+    let values = q_indicators::yang_zhang(open, high, low, close, window, periods_per_year)
+        .map_err(rejection)?;
+    Ok(single_out("yang_zhang", values))
+}
+
+fn bind_rsi(inputs: &KernelInputs<'_>, params: &Params) -> Result<KernelOutputs, KernelError> {
+    bind_close_period(inputs, params, "rsi", q_indicators::rsi)
+}
+
+fn bind_bollinger_bands(
+    inputs: &KernelInputs<'_>,
+    params: &Params,
+) -> Result<KernelOutputs, KernelError> {
+    let close = inputs.column("close")?;
+    let period = param_i64(params, "period")?;
+    let num_std = param_f64(params, "num_std")?;
+    let bands = q_indicators::bollinger_bands(close, period, num_std).map_err(rejection)?;
+    let mut out = KernelOutputs::new();
+    out.insert("upper", bands.upper);
+    out.insert("middle", bands.middle);
+    out.insert("lower", bands.lower);
+    Ok(out)
+}
+
+fn bind_macd(inputs: &KernelInputs<'_>, params: &Params) -> Result<KernelOutputs, KernelError> {
+    let close = inputs.column("close")?;
+    let fast_period = param_i64(params, "fast_period")?;
+    let slow_period = param_i64(params, "slow_period")?;
+    let signal_period = param_i64(params, "signal_period")?;
+    let macd =
+        q_indicators::macd(close, fast_period, slow_period, signal_period).map_err(rejection)?;
+    let mut out = KernelOutputs::new();
+    out.insert("line", macd.line);
+    out.insert("signal", macd.signal);
+    out.insert("histogram", macd.histogram);
+    Ok(out)
+}
+
+fn bind_donchian_channels(
+    inputs: &KernelInputs<'_>,
+    params: &Params,
+) -> Result<KernelOutputs, KernelError> {
+    let high = inputs.column("high")?;
+    let low = inputs.column("low")?;
+    let period = param_i64(params, "period")?;
+    let ch = q_indicators::donchian_channels(high, low, period).map_err(rejection)?;
+    let mut out = KernelOutputs::new();
+    out.insert("upper", ch.upper);
+    out.insert("lower", ch.lower);
+    Ok(out)
+}
+
+fn bind_atr(inputs: &KernelInputs<'_>, params: &Params) -> Result<KernelOutputs, KernelError> {
+    let high = inputs.column("high")?;
+    let low = inputs.column("low")?;
+    let close = inputs.column("close")?;
+    let period = param_i64(params, "period")?;
+    let values = q_indicators::atr(high, low, close, period).map_err(rejection)?;
+    Ok(single_out("atr", values))
+}
+
 const BINDINGS: &[Binding] = &[
     Binding {
         function_id: "ma_sma",
@@ -147,6 +229,34 @@ const BINDINGS: &[Binding] = &[
     Binding {
         function_id: "clip",
         kernel: bind_clip,
+    },
+    Binding {
+        function_id: "realized_vol",
+        kernel: bind_realized_vol,
+    },
+    Binding {
+        function_id: "yang_zhang",
+        kernel: bind_yang_zhang,
+    },
+    Binding {
+        function_id: "rsi",
+        kernel: bind_rsi,
+    },
+    Binding {
+        function_id: "bollinger_bands",
+        kernel: bind_bollinger_bands,
+    },
+    Binding {
+        function_id: "macd",
+        kernel: bind_macd,
+    },
+    Binding {
+        function_id: "donchian_channels",
+        kernel: bind_donchian_channels,
+    },
+    Binding {
+        function_id: "atr",
+        kernel: bind_atr,
     },
 ];
 const PENDING: &str = include_str!("reference_pending.txt");

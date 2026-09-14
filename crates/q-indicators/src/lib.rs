@@ -7,11 +7,13 @@
 mod elementwise;
 mod error;
 mod ieee;
+mod indicators;
 mod moving_averages;
 mod transforms;
 mod window;
 
 pub use error::IndicatorError;
+pub use indicators::*;
 pub use moving_averages::*;
 pub use transforms::*;
 
