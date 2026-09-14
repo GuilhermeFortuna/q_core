@@ -25,6 +25,7 @@ def main():
     if not wheels:
         raise RuntimeError(f"No wheels found in {dist}. Run `make wheel` first.")
     wheel_path = sorted(wheels)[-1]
+    print(f"wheel file: {wheel_path.name}")
 
     with tempfile.TemporaryDirectory() as tmpdir:
         venv_dir = Path(tmpdir) / "venv"
@@ -36,17 +37,33 @@ def main():
         )
 
         code = f"""
+import numpy as np
 import q_core
+import q_core.indicators as qi
+
 v = q_core.version()
 c = q_core.contracts_rev()
 print(f"wheel version: {{v}}")
 print(f"wheel contracts_rev: {{c}}")
 assert v == {expected_version!r}, f"Version mismatch: {{v}} != {expected_version!r}"
 assert c == {expected_rev!r}, f"Contracts rev mismatch: {{c}} != {expected_rev!r}"
+
+x = np.array([1.0, 2.0, 3.0], dtype=np.float64)
+y = qi.identity(x)
+assert y.dtype == np.float64
+assert np.array_equal(y, x)
+
+try:
+    qi.identity(np.array([1, 2, 3], dtype=np.int64))
+except TypeError:
+    pass
+else:
+    raise AssertionError("int64 input must raise TypeError")
 """
         res = subprocess.run([str(python_bin), "-c", code], capture_output=True, text=True)
         if res.returncode != 0:
             sys.stderr.write(res.stderr)
+            sys.stdout.write(res.stdout)
             sys.exit(res.returncode)
         print(res.stdout.strip())
         print("Wheel integration test passed successfully.")
