@@ -36,7 +36,9 @@ contracts:
 	git -C "$$contracts_tmp/q_contracts" checkout --quiet "$$(cat CONTRACTS_REV)"; \
 	rm -rf contracts; \
 	mkdir -p contracts; \
-	cp -R "$$contracts_tmp/q_contracts/generated/rust/." contracts/
+	cp -R "$$contracts_tmp/q_contracts/generated/rust/." contracts/; \
+	mkdir -p contracts/schema/api/arrow; \
+	cp "$$contracts_tmp/q_contracts/schema/api/arrow/bars.schema.json" contracts/schema/api/arrow/bars.schema.json
 
 contracts-check:
 	contracts_tmp="$$(mktemp -d)"; \
@@ -50,7 +52,9 @@ contracts-check:
 		uv run --project "$$contracts_tmp/q_contracts" python "$$contracts_tmp/q_contracts/tools/generate.py" \
 			--language rust --out "$$generated_tmp"; \
 	fi; \
-	diff -ru contracts "$$generated_tmp/rust"
+	diff -ru --exclude=schema contracts "$$generated_tmp/rust"; \
+	diff -u contracts/schema/api/arrow/bars.schema.json \
+		"$$contracts_tmp/q_contracts/schema/api/arrow/bars.schema.json"
 
 wheel:
 	rm -rf dist
