@@ -1336,7 +1336,7 @@ dependencies = [
 
 [[package]]
 name = "q-buffers"
-version = "2026.9.12"
+version = "2026.9.14"
 dependencies = [
  "serde",
  "serde_json",
@@ -1344,7 +1344,7 @@ dependencies = [
 
 [[package]]
 name = "q-engine"
-version = "2026.9.12"
+version = "2026.9.14"
 dependencies = [
  "q-buffers",
  "q-indicators",
@@ -1352,21 +1352,21 @@ dependencies = [
 
 [[package]]
 name = "q-indicators"
-version = "2026.9.12"
+version = "2026.9.14"
 dependencies = [
  "q-parity",
 ]
 
 [[package]]
 name = "q-io"
-version = "2026.9.12"
+version = "2026.9.14"
 dependencies = [
  "q-buffers",
 ]
 
 [[package]]
 name = "q-parity"
-version = "2026.9.12"
+version = "2026.9.14"
 dependencies = [
  "serde",
  "serde_json",
@@ -1374,7 +1374,7 @@ dependencies = [
 
 [[package]]
 name = "q-py"
-version = "2026.9.12"
+version = "2026.9.14"
 dependencies = [
  "numpy",
  "pyo3",
@@ -1386,7 +1386,7 @@ dependencies = [
 
 [[package]]
 name = "q-qt"
-version = "2026.9.12"
+version = "2026.9.14"
 dependencies = [
  "cxx",
  "cxx-qt",

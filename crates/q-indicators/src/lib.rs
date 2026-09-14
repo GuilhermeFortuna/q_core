@@ -17,7 +17,7 @@ pub use indicators::*;
 pub use moving_averages::*;
 pub use transforms::*;
 
-/// The crate's build identity.
+/// Build identity for this crate (kernels and `IndicatorError` are also public).
 pub const CRATE_NAME: &str = "q-indicators";
 
 #[cfg(test)]

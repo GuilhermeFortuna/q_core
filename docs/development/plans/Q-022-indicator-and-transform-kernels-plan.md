@@ -540,14 +540,14 @@ Cargo.toml, pyproject.toml                    version -> release date
     Confirm the test fails. Implement `crates/q-py/src/indicators.rs`, register
     the submodule and its `sys.modules` entry, and remove the spike's `identity`.
     Run `make wheel-test` and `make parity-isolation`, and confirm both pass. Commit.
-- [ ] 14. Add `tools/bench/compare_pandas.py`. It generates a fixed-seed close, OHLC
+- [x] 14. Add `tools/bench/compare_pandas.py`. It generates a fixed-seed close, OHLC
     of one million bars, and 100,000 bars for rolling rank. For RSI(14),
     Bollinger(20, 2), WMA(20), HMA(20), Yang–Zhang(20), and rolling rank(20),
     it times `q_backend`'s pandas function and the `q_core.indicators` function
     over five runs each with `time.perf_counter_ns`. It prints each run and the
     median, and first asserts that the two results agree under the fixture
     tolerance. Run it once on 10,000 bars to confirm it executes. Commit.
-- [ ] 15. Release preparation. Add the version-bump step to `RELEASING.md`, bump
+- [x] 15. Release preparation. Add the version-bump step to `RELEASING.md`, bump
     `Cargo.toml` `[workspace.package] version` and `pyproject.toml` `version` to
     today's date, refresh `Cargo.lock`, update the `CRATE_NAME` doc comment and
     the `q-indicators` row in `README.md` to name the 16 functions, and run

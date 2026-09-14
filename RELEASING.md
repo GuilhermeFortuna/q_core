@@ -11,6 +11,8 @@ vYYYY.MM.DD.n   # if multiple releases occur on the same day
 
 Semantic versioning makes compatibility assertions that cannot be validated without running the full parity suite. In this architecture, compatibility across repository boundaries is governed strictly by the cross-repository compatibility record in `q_contracts/COMPAT.md` and verified by golden parity runs.
 
+The workspace Cargo/`pyproject.toml` version uses the unpadded form `YYYY.M.D` (for example `2026.9.14`); the git tag uses zero-padded `vYYYY.MM.DD` (for example `v2026.09.14`).
+
 ---
 
 ## Release Procedure
@@ -21,23 +23,30 @@ Semantic versioning makes compatibility assertions that cannot be validated with
    git status
    ```
 
-2. **Execute Validation Suite**:
+2. **Bump package versions**:
+   Set `[workspace.package] version` in `Cargo.toml` and `version` in `pyproject.toml` to
+   today's release date in `YYYY.M.D` form (month and day without zero-padding, matching
+   existing values such as `2026.9.12`). Refresh `Cargo.lock` (for example via
+   `cargo metadata` or a workspace build) so workspace crate versions match. Confirm
+   `q_core.version()` will report the new value after the next wheel build.
+
+3. **Execute Validation Suite**:
    Run the canonical validation suite:
    ```bash
    make check
    ```
    All checks (rustfmt, clippy, cargo tests, wheel build, clean venv wheel installation test, Qt C++ harness test, and contracts regeneration check) must pass with zero warnings or errors.
 
-3. **Create Git Tag**:
+4. **Create Git Tag**:
    Tag the commit using the release date format:
    ```bash
-   git tag v2026.09.12
+   git tag v2026.09.14
    ```
 
-4. **Publish Tag**:
+5. **Publish Tag**:
    Push the tag to the remote repository:
    ```bash
-   git push origin v2026.09.12
+   git push origin v2026.09.14
    ```
 
 ---
@@ -56,7 +65,7 @@ dependencies = [
 ]
 
 [tool.uv.sources]
-q-core = { git = "https://github.com/GuilhermeFortuna/q_core.git", tag = "v2026.09.12" }
+q-core = { git = "https://github.com/GuilhermeFortuna/q_core.git", tag = "v2026.09.14" }
 ```
 
 Run resolution and installation:
