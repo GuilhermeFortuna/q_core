@@ -610,7 +610,7 @@ fn replay(file: &q_parity::fixture::FixtureFile) -> Result<WindowTrace, String>;
    - `set_forming` with 2 rows gives `FormingNotSingleBar`.
 
    Confirm they fail, implement, and confirm they pass. Commit.
-8. Add exporter tests to `tools/reference/test_export_reference.py`:
+8. [x] Add exporter tests to `tools/reference/test_export_reference.py`:
    - `encode_time` of `pd.date_range("2023-01-02", periods=2, freq="h",
      tz="UTC")` gives an `int64` column with values
      `[1672617600000000, 1672621200000000]`;

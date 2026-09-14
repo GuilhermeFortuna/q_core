@@ -35,6 +35,7 @@ from export_reference import (
     verify_environment,
 )
 import numpy as np
+import pandas as pd
 
 
 def get_or_fetch_backend() -> BackendSource:
@@ -559,6 +560,51 @@ class TestStep5Cases(unittest.TestCase):
                 )
             self.assertEqual(code, 2)
             self.assertIn("--allow-numeric-in-backend", buf.getvalue())
+
+
+class TestBarWindowFamily(unittest.TestCase):
+    def test_encode_time_hourly_utc(self) -> None:
+        from families.bar_window import encode_time
+
+        index = pd.date_range("2023-01-02", periods=2, freq="h", tz="UTC")
+        col = encode_time(index)
+        self.assertEqual(col["dtype"], "int64")
+        self.assertEqual(col["values"], [1672617600000000, 1672621200000000])
+
+    def test_encode_time_rejects_sub_microsecond(self) -> None:
+        from families.bar_window import encode_time
+
+        index = pd.DatetimeIndex(
+            [pd.Timestamp("2023-01-02T00:00:00.000000001", tz="UTC")]
+        )
+        with self.assertRaises(ValueError):
+            encode_time(index)
+
+    def test_stub_strategy_entry_conditions_empty(self) -> None:
+        from families.bar_window import _StubStrategy
+
+        stub = object.__new__(_StubStrategy)
+        self.assertEqual(stub.check_entry_conditions(pd.Series(dtype=float)), [])
+
+    def test_scenario_steps_nine_ids_and_bounds(self) -> None:
+        from families.bar_window import SCENARIO_IDS, scenario_steps
+
+        index = pd.date_range("2023-01-02", periods=40, freq="h", tz="UTC")
+        bars = pd.DataFrame(
+            {
+                "open": np.arange(40, dtype=float),
+                "high": np.arange(40, dtype=float) + 1,
+                "low": np.arange(40, dtype=float) - 1,
+                "close": np.arange(40, dtype=float) + 0.5,
+                "volume": np.ones(40),
+            },
+            index=index,
+        )
+        steps = scenario_steps(bars)
+        self.assertEqual(tuple(steps.keys()), SCENARIO_IDS)
+        expected_bounds = (20, 20, 20, 20, 20, 50, 20, 20, 1)
+        for sid, bound in zip(SCENARIO_IDS, expected_bounds, strict=True):
+            self.assertEqual(steps[sid][0], bound, sid)
 
 
 if __name__ == "__main__":
