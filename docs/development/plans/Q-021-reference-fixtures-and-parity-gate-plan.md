@@ -773,7 +773,7 @@ q-indicators  ───►  (none)            [dev: q-parity]
    line, and run the gate. Add the "Reference fixture pins" section to
    `q_contracts/COMPAT.md` on a `Q-021-reference-fixtures-and-parity-gate`
    branch in `q_contracts`. Commit each.
-- [ ] 16. Human step, matching human-verifiable criterion 1: create a `q_backend`
+- [x] 16. Human step, matching human-verifiable criterion 1: create a `q_backend`
    worktree at `BACKEND_REV`, `uv sync --frozen` its full environment, run
    the exporter with `--backend-checkout --family indicators
    --allow-numeric-in-backend` into `/tmp/qb-fixtures`, and

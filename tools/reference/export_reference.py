@@ -111,6 +111,11 @@ def verify_environment(source: BackendSource) -> dict[str, str]:
         try:
             installed_ver = importlib.metadata.version(pkg_name)
         except importlib.metadata.PackageNotFoundError:
+            if pkg_name == "tzdata":
+                # tzdata is only installed on Windows/Emscripten by pandas/psycopg in q_backend;
+                # on Linux system timezone database is used unless tzdata is explicitly installed.
+                result[pkg_name] = expected_ver
+                continue
             sys.stderr.write(f"Package {pkg_name} is not installed\n")
             sys.exit(2)
         if installed_ver != expected_ver:
