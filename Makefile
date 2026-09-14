@@ -1,4 +1,4 @@
-.PHONY: check fmt fmt-check lint test wheel wheel-test qt qt-test contracts contracts-check
+.PHONY: check ci hooks fmt fmt-check lint test wheel wheel-test qt qt-test contracts contracts-check
 
 CONTRACTS_REPO ?= https://github.com/GuilhermeFortuna/q_contracts.git
 MATURIN ?= $(shell command -v maturin 2>/dev/null || echo "uvx maturin")
@@ -6,6 +6,12 @@ QT_MINIMAL_DIR ?= $(shell find $(HOME)/.local/share/qt_minimal_download -name "Q
 
 check: fmt-check lint test wheel-test qt-test contracts-check
 	@echo "All workspace checks passed successfully."
+
+ci:
+	./scripts/ci.sh
+
+hooks:
+	./scripts/install-hooks.sh
 
 fmt:
 	cargo fmt --all

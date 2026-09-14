@@ -1,0 +1,16 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+echo "==> Running pre-commit hook (rustfmt check & clippy)..."
+REPO_ROOT="$(git rev-parse --show-toplevel)"
+cd "$REPO_ROOT"
+
+make --no-print-directory fmt-check
+
+# Clippy compiles the workspace, so skip it when no Rust or Cargo inputs are staged
+# (docs-only commits). The full suite runs in the pre-push hook.
+if git diff --cached --name-only --diff-filter=ACMR | grep -qE '\.rs$|(^|/)Cargo\.(toml|lock)$|(^|/)build\.rs$|^clippy\.toml$|^rust-toolchain\.toml$'; then
+  make --no-print-directory lint
+else
+  echo "No Rust/Cargo changes staged; skipping clippy."
+fi
