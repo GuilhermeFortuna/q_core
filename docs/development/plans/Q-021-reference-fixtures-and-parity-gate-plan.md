@@ -696,22 +696,20 @@ q-indicators  ───►  (none)            [dev: q-parity]
    `format` of `q-core-reference-fixture/2` gives `UnknownFormat`. A case
    referencing `missing.close` gives `DanglingInput`. Confirm they fail,
    implement, and confirm they pass. Commit.
-- [ ] 9. Write failing tests in `compare.rs`. Under
+- [x] 9. Write failing tests in `compare.rs`. Under
    `AbsRelTol { abs: 1e-10, rel: 1e-12 }`, `[1.0]` against `[1.0 + 5e-11]`
    passes through the absolute bound. `[1.0]` against `[1.0 + 2e-10]` exceeds
    both bounds (the relative bound is `1e-12`) and fails with `Magnitude` at
    index 0. `[130000.0]` against `[130000.0 + 1e-8]` is above the absolute
    bound but within the relative bound `1.3e-7`, so it passes only through
    the relative bound. `[130000.0]` against `[130000.0 + 2e-7]` exceeds both
-   bounds and fails. `[NaN, 1.0]` against `[1.0, NaN]` fails with
-   `NanPlacement` at 0. `[inf]` against `[-inf]` fails with `Infinity`.
-   `[-0.0]` against `[0.0]` passes, and lengths 3 against 2 fail with `Length`.
-   Under `Exact`, `1.0` against `f64::from_bits(1.0f64.to_bits() + 1)` fails
-   with `Bits`, and `-0.0` against `0.0` fails. `compare_outputs` with a
-   missing output name fails with `MissingOutput`, and the `Mismatch` display
-   contains output, index, expected, and actual. Against the real fixtures,
-   every case's expected outputs compared with themselves pass. Confirm they
-   fail, implement, and confirm they pass. Commit.
+   bounds and fails with `Magnitude`. NaN at the same index passes; NaN at
+   different indices fails with `NanMismatch`. `+inf` vs `+inf` passes; `+inf`
+   vs `-inf` fails with `InfSignMismatch`. `-0.0` vs `0.0` passes. Under
+   `Exact`, `-0.0` vs `0.0` fails with `ZeroSignMismatch`. Length mismatch
+   fails with `LengthMismatch`. A round-trip test against the committed
+   `indicators/` fixtures comparing each with itself passes across all 395
+   cases. Confirm they fail. Implement `compare.rs`. Confirm they pass. Commit.
 - [ ] 10. Write failing tests in `determinism.rs` and `causality.rs`, using the
    `test.` kernels described in the decisions. The identity kernel passes
    both. The call-counter kernel fails `check_double_run` at output `out`,
