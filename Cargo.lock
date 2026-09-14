@@ -1276,12 +1276,23 @@ dependencies = [
 [[package]]
 name = "q-indicators"
 version = "2026.9.12"
+dependencies = [
+ "q-parity",
+]
 
 [[package]]
 name = "q-io"
 version = "2026.9.12"
 dependencies = [
  "q-buffers",
+]
+
+[[package]]
+name = "q-parity"
+version = "2026.9.12"
+dependencies = [
+ "serde",
+ "serde_json",
 ]
 
 [[package]]

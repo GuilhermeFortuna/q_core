@@ -1,0 +1,68 @@
+{
+ "columns": {
+  "close": {
+   "bits_fnv1a64": "0x5fe321adf6e7a9b0",
+   "dtype": "float64",
+   "values": [
+    100.52005340824796,
+    100.27535386865233,
+    101.0652048265274
+   ]
+  },
+  "high": {
+   "bits_fnv1a64": "0x55f4519077564053",
+   "dtype": "float64",
+   "values": [
+    100.90119380485417,
+    100.3433399941737,
+    101.19235395731326
+   ]
+  },
+  "low": {
+   "bits_fnv1a64": "0x0ac01485c0897fb1",
+   "dtype": "float64",
+   "values": [
+    99.65895708711145,
+    99.37822430001022,
+    99.81582140944994
+   ]
+  },
+  "open": {
+   "bits_fnv1a64": "0xee4788d270f8ef93",
+   "dtype": "float64",
+   "values": [
+    100.18404947971841,
+    100.25738741516406,
+    100.50749499677597
+   ]
+  },
+  "volume": {
+   "bits_fnv1a64": "0xac21883b430d5b7c",
+   "dtype": "float64",
+   "values": [
+    3471.0,
+    1066.0,
+    2341.0
+   ]
+  }
+ },
+ "format": "q-core-reference-fixture/1",
+ "input_id": "short_n3",
+ "provenance": {
+  "backend_repo": "https://github.com/GuilhermeFortuna/q_backend.git",
+  "backend_rev": "067e29cdf8db67d8b8c237599fced0b8eabb921f",
+  "construction": "First 3 bars of synthetic OHLCV",
+  "exporter": "tools/reference/export_reference.py",
+  "generator": {
+   "blob": "562f795a7fceb04ce56d0aa054ab9c17eadee803",
+   "kwargs": {
+    "freq": "h",
+    "n": 400,
+    "seed": 20240609,
+    "start": "2023-01-02"
+   },
+   "name": "synthetic_ohlcv",
+   "path": "tests/backtesting/test_goldens.py"
+  }
+ }
+}
