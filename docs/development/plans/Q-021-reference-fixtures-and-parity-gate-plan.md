@@ -710,7 +710,7 @@ q-indicators  ───►  (none)            [dev: q-parity]
    fails with `LengthMismatch`. A round-trip test against the committed
    `indicators/` fixtures comparing each with itself passes across all 395
    cases. Confirm they fail. Implement `compare.rs`. Confirm they pass. Commit.
-- [ ] 10. Write failing tests in `determinism.rs` and `causality.rs`, using the
+- [x] 10. Write failing tests in `determinism.rs` and `causality.rs`, using the
    `test.` kernels described in the decisions. The identity kernel passes
    both. The call-counter kernel fails `check_double_run` at output `out`,
    index 0. The next-bar kernel fails `check_prefix_causal` at index 0,

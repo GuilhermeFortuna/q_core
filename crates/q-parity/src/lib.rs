@@ -5,6 +5,8 @@
 //! and checks double-run determinism and prefix causality.
 //! Dev-dependency only; never linked into q-py or q-qt.
 
+pub mod causality;
 pub mod compare;
+pub mod determinism;
 pub mod fixture;
 pub mod gate;
