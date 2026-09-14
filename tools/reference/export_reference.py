@@ -14,6 +14,10 @@ import subprocess
 import sys
 import tempfile
 import tomllib
+
+if __name__ == "__main__":
+    sys.modules.setdefault("export_reference", sys.modules["__main__"])
+
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path

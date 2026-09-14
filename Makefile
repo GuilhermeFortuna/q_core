@@ -1,10 +1,14 @@
-.PHONY: check ci hooks fmt fmt-check lint test wheel wheel-test qt qt-test contracts contracts-check
+.PHONY: check ci hooks fmt fmt-check lint test wheel wheel-test qt qt-test contracts contracts-check \
+	fixtures fixtures-check fixtures-backend fixtures-backend-check fixtures-test parity-isolation
 
+BACKEND_REPO ?= https://github.com/GuilhermeFortuna/q_backend.git
 CONTRACTS_REPO ?= https://github.com/GuilhermeFortuna/q_contracts.git
+NUMERIC_FAMILIES := indicators
+BACKEND_FAMILIES :=
 MATURIN ?= $(shell command -v maturin 2>/dev/null || echo "uvx maturin")
 QT_MINIMAL_DIR ?= $(shell find $(HOME)/.local/share/qt_minimal_download -name "QtCore" -type d 2>/dev/null | head -n 1)/../..
 
-check: fmt-check lint test wheel-test qt-test contracts-check
+check: fmt-check lint test fixtures-test fixtures-check parity-isolation wheel-test qt-test contracts-check
 	@echo "All workspace checks passed successfully."
 
 ci:
@@ -71,3 +75,51 @@ qt-test: qt
 		-L "$$qt_dir/lib" -lQt6Core \
 		-lpthread -ldl -lm -fPIC; \
 	LD_LIBRARY_PATH="$$qt_dir/lib:$$LD_LIBRARY_PATH" target/debug/qt_harness
+
+fixtures-test:
+	uv run --frozen --project tools/reference python -m unittest discover -s tools/reference
+
+fixtures:
+	uv run --frozen --project tools/reference python tools/reference/export_reference.py --backend-repo "$(BACKEND_REPO)" $(NUMERIC_FAMILIES:%=--family %) --out fixtures/reference
+
+fixtures-check:
+	@fixtures_tmp="$$(mktemp -d)"; \
+	trap 'rm -rf "$$fixtures_tmp"' EXIT; \
+	uv run --frozen --project tools/reference python tools/reference/export_reference.py --backend-repo "$(BACKEND_REPO)" $(NUMERIC_FAMILIES:%=--family %) --out "$$fixtures_tmp"; \
+	uv run --frozen --project tools/reference python tools/reference/export_reference.py compare fixtures/reference "$$fixtures_tmp"
+
+fixtures-backend:
+	@if [ -z "$(BACKEND_FAMILIES)" ]; then \
+		echo "No backend families configured (BACKEND_FAMILIES is empty)."; \
+	else \
+		qb_tmp="$$(mktemp -d)"; \
+		trap 'rm -rf "$$qb_tmp"' EXIT; \
+		git clone --quiet "$(BACKEND_REPO)" "$$qb_tmp/q_backend"; \
+		git -C "$$qb_tmp/q_backend" checkout --quiet "$$(cat BACKEND_REV)"; \
+		uv sync --frozen --project "$$qb_tmp/q_backend"; \
+		uv run --frozen --project "$$qb_tmp/q_backend" python tools/reference/export_reference.py \
+			--backend-checkout "$$qb_tmp/q_backend" $(BACKEND_FAMILIES:%=--family %) --out fixtures/reference; \
+	fi
+
+fixtures-backend-check:
+	@if [ -z "$(BACKEND_FAMILIES)" ]; then \
+		echo "No backend families configured (BACKEND_FAMILIES is empty)."; \
+	else \
+		qb_tmp="$$(mktemp -d)"; \
+		fixtures_tmp="$$(mktemp -d)"; \
+		trap 'rm -rf "$$qb_tmp" "$$fixtures_tmp"' EXIT; \
+		git clone --quiet "$(BACKEND_REPO)" "$$qb_tmp/q_backend"; \
+		git -C "$$qb_tmp/q_backend" checkout --quiet "$$(cat BACKEND_REV)"; \
+		uv sync --frozen --project "$$qb_tmp/q_backend"; \
+		uv run --frozen --project "$$qb_tmp/q_backend" python tools/reference/export_reference.py \
+			--backend-checkout "$$qb_tmp/q_backend" $(BACKEND_FAMILIES:%=--family %) --out "$$fixtures_tmp"; \
+		diff -ru fixtures/reference "$$fixtures_tmp"; \
+	fi
+
+parity-isolation:
+	@if cargo tree -p q-py -e normal,build 2>/dev/null | grep -q "q-parity"; then \
+		echo "ERROR: q-parity found in q-py dependency tree" >&2; exit 1; \
+	fi
+	@if cargo tree -p q-qt -e normal,build 2>/dev/null | grep -q "q-parity"; then \
+		echo "ERROR: q-parity found in q-qt dependency tree" >&2; exit 1; \
+	fi
