@@ -9,28 +9,24 @@
     clippy::float_cmp,
     reason = "pandas window kernels use C == for same-value and NaN checks"
 )]
-#[allow(dead_code)] // called from pub(crate) window kernels (test-only until public API)
 pub(crate) fn ieee_eq(a: f64, b: f64) -> bool {
     a == b
 }
 
 /// Pandas `BaseWindow._prep_values` missing: NaN or ±infinity.
 #[inline]
-#[allow(dead_code)] // called from pub(crate) window kernels (test-only until public API)
 pub(crate) fn window_missing(x: f64) -> bool {
     x.is_nan() || x.is_infinite()
 }
 
 /// Center of mass from span: `(span - 1) / 2`.
 #[inline]
-#[allow(dead_code)] // used by EWM callers in subsequent steps
 pub(crate) fn com_from_span(span: i64) -> f64 {
     (span - 1) as f64 / 2.0
 }
 
 /// Center of mass from SMMA/RSI-style alpha period: `alpha = 1/period`, then `(1 - alpha) / alpha`.
 #[inline]
-#[allow(dead_code)] // used by EWM callers in subsequent steps
 pub(crate) fn com_from_alpha_period(period: i64) -> f64 {
     let alpha = 1.0 / (period as f64);
     (1.0 - alpha) / alpha

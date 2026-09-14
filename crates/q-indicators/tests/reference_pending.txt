@@ -4,11 +4,6 @@ atr
 bollinger_bands
 clip
 donchian_channels
-ma_ema
-ma_hma
-ma_sma
-ma_smma
-ma_wma
 macd
 pct_change
 realized_vol

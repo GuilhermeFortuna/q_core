@@ -1,7 +1,6 @@
 //! Pandas FixedWindowIndexer rolling primitives (mean, var, std).
 //!
-//! These `pub(crate)` kernels are only called from unit tests until public
-//! indicator wrappers land; keep them despite crate-level dead_code.
+//! Remaining `pub(crate)` helpers are wired by transforms/indicators in later steps.
 
 #![allow(dead_code)]
 #![allow(clippy::needless_range_loop)]
