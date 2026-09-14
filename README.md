@@ -22,6 +22,7 @@ Every responsibility named in §5 of the system architecture is mapped to exactl
 | `q-io` | Columnar codecs & readers | Parquet and Arrow codecs and byte decoders. Reads explicitly provided files/buffers; never performs filesystem discovery. |
 | `q-py` | Python native binding | PyO3 projection layer. Exposes `q_core` module and callables to Python. Projection only; contains zero computational semantics. |
 | `q-qt` | Qt native binding | CXX-Qt projection layer. Exposes `CoreInfo` and QObject interfaces to Qt/QML. Projection only; contains zero computational semantics. |
+| `q-parity` | Parity gate & reference fixtures | Test support for reference fixtures, numerical tolerance comparisons, double-run determinism, and prefix causality. `publish = false`; dev-dependency only. |
 
 ---
 
@@ -30,16 +31,18 @@ Every responsibility named in §5 of the system architecture is mapped to exactl
 Dependencies flow strictly downward and are enforced by Cargo manifests:
 
 ```
-q-indicators  ───►  (none)
+q-indicators  ───►  (none)            [dev: q-parity]
 q-buffers     ───►  contracts module
 q-io          ───►  q-buffers
 q-engine      ───►  q-indicators, q-buffers
 q-py          ───►  q-engine, q-io, q-buffers, q-indicators
 q-qt          ───►  q-engine, q-io, q-buffers, q-indicators
+q-parity      ───►  (none)
 ```
 
 - Any attempt to introduce an upward or cyclic dependency (such as `q-indicators -> q-engine`) fails the build at `cargo metadata` / compile time.
 - Neither binding crate (`q-py`, `q-qt`) depends on the other. Building `q-py` requires no Qt toolchain; building `q-qt` requires no Python headers.
+- Neither binding crate depends on `q-parity` (enforced by `make parity-isolation`). `q-parity` is used strictly as a dev-dependency.
 - No semantic crate depends on a host or knows whether it runs in Python, Qt, or unit tests.
 
 ---
@@ -62,6 +65,28 @@ q-qt          ───►  q-engine, q-io, q-buffers, q-indicators
 - `contracts/`: Vendored generated Rust types (`api.rs`, `catalog.rs`, `edge.rs`, `mod.rs`, `stream.rs`), included by `q-buffers`.
 - `make contracts`: Clones `q_contracts` at `CONTRACTS_REV` and copies generated Rust files.
 - `make contracts-check`: Clones `q_contracts` at `CONTRACTS_REV`, regenerates Rust contracts from schemas, and asserts zero diff.
+
+---
+
+## Reference Fixtures & Parity Gate
+
+`q_core` gates parity, determinism, and causality of its numerical kernels against reference fixtures generated from `q_backend`:
+- `BACKEND_REV`: Commit hash of `q_backend` pinned by this workspace for reference fixtures.
+- `fixtures/reference/`: Committed reference datasets (`inputs/`) and golden outputs (`indicators/`).
+- `make fixtures`: Exports reference fixtures from `q_backend` at `BACKEND_REV` using the pinned exporter environment (`tools/reference`).
+- `make fixtures-check`: Exports fixtures into a temporary directory and validates byte-for-byte reproducibility and provenance.
+- `make fixtures-backend` / `make fixtures-backend-check`: Export / verify fixtures requiring the full `q_backend` environment (`BACKEND_FAMILIES`).
+- `make parity-isolation`: Confirms that `q-parity` is not included in the normal or build dependency tree of `q-py` or `q-qt`.
+
+### Pending Fixtures and Kernel Implementation
+
+`crates/q-indicators/tests/reference_pending.txt` tracks all reference functions that are accounted for by the reference suite but not yet bound to a Rust kernel. The parity gate fail-closes on any unaccounted, mismatched, or conflicting fixture.
+
+**Procedure for implementing a kernel (Q-022+):**
+1. Implement the kernel in `q-indicators`.
+2. Add a `Binding` to `BINDINGS` in `crates/q-indicators/tests/reference_gate.rs`.
+3. Delete the corresponding function id line from `crates/q-indicators/tests/reference_pending.txt`.
+4. Run `cargo test -p q-indicators --test reference_gate -- --nocapture` to verify that golden outputs, double-run determinism, and prefix causality all pass.
 
 ---
 
