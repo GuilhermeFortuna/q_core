@@ -1,5 +1,7 @@
 use pyo3::prelude::*;
 
+mod frame;
+
 /// Workspace version, read from the workspace manifest at compile time.
 #[pyfunction]
 fn version() -> &'static str {
@@ -17,5 +19,6 @@ fn contracts_rev() -> &'static str {
 fn q_core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(version, m)?)?;
     m.add_function(wrap_pyfunction!(contracts_rev, m)?)?;
+    frame::register(m)?;
     Ok(())
 }

@@ -649,7 +649,7 @@ fn replay(file: &q_parity::fixture::FixtureFile) -> Result<WindowTrace, String>;
    with the unit test from step 6, stop and report pandas' actual order
    instead of editing the fixture. Confirm `make parity-isolation` still
    passes. Commit.
-10. Add `numpy = "0.24"` to `q-py`, `numpy>=2` to `pyproject.toml`, and install
+10. [x] Add `numpy = "0.24"` to `q-py`, `numpy>=2` to `pyproject.toml`, and install
     numpy in the `tests/test_wheel.py` venv. Write failing
     `tests/test_bar_frame.py`, run by `make wheel-test` in the same venv:
     - a frame from `synthetic_ohlcv`-shaped arrays with
@@ -672,7 +672,7 @@ fn replay(file: &q_parity::fixture::FixtureFile) -> Result<WindowTrace, String>;
 
     Confirm they fail, implement `crates/q-py/src/frame.rs`, and confirm they
     pass. Commit.
-11. Verify that builds stay separate: `cargo build -p q-qt` succeeds with no
+11. [x] Verify that builds stay separate: `cargo build -p q-qt` succeeds with no
     Python headers in use, and `make wheel` succeeds without Qt, as in Q-007
     step 8. Run `cargo tree -p q-buffers` and confirm it shows only `serde` and
     `serde_json`. Commit if a manifest change was needed.

@@ -62,6 +62,7 @@ wheel:
 
 wheel-test: wheel
 	python3 tests/test_wheel.py
+	python3 tests/test_bar_frame.py
 
 qt:
 	cargo build -p q-qt
