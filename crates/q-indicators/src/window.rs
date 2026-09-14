@@ -360,6 +360,75 @@ pub(crate) fn rolling_std(values: &[f64], window: usize) -> Vec<f64> {
         .collect()
 }
 
+fn rolling_min_max(values: &[f64], window: usize, is_max: bool) -> Vec<f64> {
+    let n = values.len();
+    let mut output = vec![f64::NAN; n];
+    if n == 0 {
+        return output;
+    }
+    // Window 0 → empty windows → all NaN. `_roll_min_max` also raises minp to ≥1.
+    if window == 0 {
+        return output;
+    }
+    let values = prep_values(values);
+    let minp = window;
+
+    // Indices of monotonic extrema (decreasing values for max, increasing for min).
+    let mut candidates: Vec<usize> = Vec::new();
+
+    for i in 0..n {
+        let (start, end) = fixed_bounds(i, window);
+        debug_assert_eq!(end, i + 1);
+
+        while candidates.first().is_some_and(|&idx| idx < start) {
+            candidates.remove(0);
+        }
+
+        let val = values[i];
+        if ieee_eq(val, val) {
+            while let Some(&back) = candidates.last() {
+                let back_val = values[back];
+                let should_pop = if is_max {
+                    val >= back_val
+                } else {
+                    val <= back_val
+                };
+                if should_pop {
+                    candidates.pop();
+                } else {
+                    break;
+                }
+            }
+            candidates.push(i);
+        }
+
+        let mut nobs = 0usize;
+        for &x in &values[start..end] {
+            if ieee_eq(x, x) {
+                nobs += 1;
+            }
+        }
+
+        if nobs >= minp {
+            if let Some(&front) = candidates.first() {
+                output[i] = values[front];
+            }
+        }
+    }
+
+    output
+}
+
+/// Pandas `_roll_min_max` with `is_max = true`, FixedWindowIndexer, `min_periods = window`.
+pub(crate) fn rolling_max(values: &[f64], window: usize) -> Vec<f64> {
+    rolling_min_max(values, window, true)
+}
+
+/// Pandas `_roll_min_max` with `is_max = false`, FixedWindowIndexer, `min_periods = window`.
+pub(crate) fn rolling_min(values: &[f64], window: usize) -> Vec<f64> {
+    rolling_min_max(values, window, false)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -459,5 +528,23 @@ mod tests {
         assert!(rolling_mean(&[], 2).is_empty());
         assert!(rolling_var(&[], 2).is_empty());
         assert!(rolling_std(&[], 2).is_empty());
+        assert!(rolling_max(&[], 2).is_empty());
+        assert!(rolling_min(&[], 2).is_empty());
+    }
+
+    #[test]
+    fn rolling_max_window2_with_nan() {
+        let got = rolling_max(&[1.0, f64::NAN, 3.0, 2.0], 2);
+        assert_bits_eq(&got, &[f64::NAN, f64::NAN, f64::NAN, 3.0]);
+    }
+
+    #[test]
+    fn donchian_composition_period2() {
+        let high = [1.0, 3.0, 2.0, 5.0, 4.0];
+        let low = [0.0, 1.0, 1.0, 2.0, 3.0];
+        let upper = crate::elementwise::shift(&rolling_max(&high, 2), 1);
+        let lower = crate::elementwise::shift(&rolling_min(&low, 2), 1);
+        assert_bits_eq(&upper, &[f64::NAN, f64::NAN, 3.0, 3.0, 5.0]);
+        assert_bits_eq(&lower, &[f64::NAN, f64::NAN, 0.0, 1.0, 1.0]);
     }
 }

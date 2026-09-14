@@ -4,6 +4,7 @@
 //! Evaluates technical indicators over numerical series with no I/O, no system clock
 //! or environment access, and strictly reproducible results across runs.
 
+mod elementwise;
 mod error;
 mod ieee;
 mod window;
