@@ -522,7 +522,7 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="Allow running numeric families in backend environment",
     )
-    parser.add_argument("--out", required=True, help="Output directory for reference fixtures")
+    parser.add_argument("--out", "--output", dest="out", required=True, help="Output directory for reference fixtures")
 
     args = parser.parse_args(argv)
     out_dir = Path(args.out)

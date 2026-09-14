@@ -717,7 +717,7 @@ q-indicators  ───►  (none)            [dev: q-parity]
    because `prefix(1)` has no next bar and gives NaN where the full run gives
    `x[1]`, and it names both values. Confirm they fail, implement, and confirm
    they pass. Commit.
-- [ ] 11. Write failing tests for the family mechanism. In Rust, a temp fixture root
+- [x] 11. Write failing tests for the family mechanism. In Rust, a temp fixture root
    with family `test_scenario` holds one file whose cases are
    `{"steps": [{"op": "append", "times": <int64 column>, "close": <float64
    column>}], "expected_after_each": [...]}` under `{"kind": "exact"}`.

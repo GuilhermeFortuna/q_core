@@ -519,6 +519,47 @@ class TestStep5Cases(unittest.TestCase):
                 self.leak_mod,
             )
 
+    def test_registered_backend_family_in_minimal_env_exits_2(self) -> None:
+        from unittest.mock import patch
+        from export_reference import FAMILIES, main
+
+        class DummyBackendFamily:
+            name = "test_backend_fam"
+            environment = "backend"
+
+            def export(self, source: BackendSource, out_dir: Path) -> None:
+                pass
+
+        FAMILIES["test_backend_fam"] = DummyBackendFamily()  # type: ignore[assignment]
+        try:
+            buf = io.StringIO()
+            with patch("sys.stderr", buf):
+                code = main(["--family", "test_backend_fam", "--out", "/tmp/dummy"])
+            self.assertEqual(code, 2)
+            self.assertIn("test_backend_fam", buf.getvalue())
+        finally:
+            del FAMILIES["test_backend_fam"]
+
+    def test_numeric_in_backend_without_flag_exits_2(self) -> None:
+        from unittest.mock import patch
+        from export_reference import main
+
+        with patch("export_reference.detect_environment", return_value="backend"):
+            buf = io.StringIO()
+            with patch("sys.stderr", buf):
+                code = main(
+                    [
+                        "--family",
+                        "indicators",
+                        "--backend-checkout",
+                        "/tmp/dummy",
+                        "--out",
+                        "/tmp/dummy",
+                    ]
+                )
+            self.assertEqual(code, 2)
+            self.assertIn("--allow-numeric-in-backend", buf.getvalue())
+
 
 if __name__ == "__main__":
     unittest.main()
