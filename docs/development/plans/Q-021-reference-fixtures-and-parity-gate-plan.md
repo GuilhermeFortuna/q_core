@@ -761,7 +761,7 @@ q-indicators  ───►  (none)            [dev: q-parity]
    pending, 0 failures`. Delete the `rsi` line and confirm it fails with
    `Unaccounted { function_id: "rsi" }`. Add a `vwap` line and confirm
    `PendingUnknown`. Revert both. Commit.
-- [ ] 14. Add the `parity-isolation` target and extend `check` in the order given in
+- [x] 14. Add the `parity-isolation` target and extend `check` in the order given in
    Interfaces. Confirm `make parity-isolation` passes. Add `q-parity` to
    `q-py`'s `[dependencies]`, confirm it fails naming `q-py`, and revert.
    Confirm `cargo test --workspace` passes with networking disabled
