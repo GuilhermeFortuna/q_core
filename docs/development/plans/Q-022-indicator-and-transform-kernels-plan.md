@@ -399,9 +399,9 @@ Cargo.toml, pyproject.toml                    version -> release date
 
 ## Ordered implementation
 
-1. Work on the branch `Q-022-indicator-and-transform-kernels` in `q_core`,
+- [x] 1. Work on the branch `Q-022-indicator-and-transform-kernels` in `q_core`,
    created from `development` by `./work start`.
-2. Projection spike. Add `numpy = "0.24"` to `crates/q-py/Cargo.toml`, or reuse
+- [x] 2. Projection spike. Add `numpy = "0.24"` to `crates/q-py/Cargo.toml`, or reuse
    the entry if Q-025 has already landed. Add `numpy>=2` to `pyproject.toml`.
    Add a temporary `q_core.indicators.identity(values)` that returns
    `PyArray1::from_vec` of a copy. Extend `tests/test_wheel.py` to install numpy
@@ -411,7 +411,7 @@ Cargo.toml, pyproject.toml                    version -> release date
    passes. Run `make parity-isolation` and confirm `q-parity` is still absent
    from q-py's graph. If the abi3 build or import fails, switch to the buffer-protocol
    fallback here and record why. Remove `identity` in step 13. Commit.
-3. Add `IndicatorError` and `ieee.rs`. Write failing tests:
+- [x] 3. Add `IndicatorError` and `ieee.rs`. Write failing tests:
    `com_from_span(3) == 1.0`; `com_from_alpha_period(2)` has the bits of
    Python's `(1 - 0.5) / 0.5`; `com_from_alpha_period(14)` has the bits of
    `(1 - 1/14) / (1/14)` (literal taken from Python);
@@ -419,7 +419,7 @@ Cargo.toml, pyproject.toml                    version -> release date
    `InvalidParameter` reads `rsi: period must be >= 1 (got 0)`. Add the
    `mul_add` disallowed methods to `clippy.toml`. Confirm the tests fail,
    implement, and confirm they pass. Commit.
-4. Write failing tests for `rolling_mean` and `rolling_var`/`rolling_std`, with
+- [x] 4. Write failing tests for `rolling_mean` and `rolling_var`/`rolling_std`, with
    values produced by pandas 3.0.2:
    - Mean, window 2 over `[0.1, 0.2, 0.3, 0.1, 0.1]`: `[nan,
      0.15000000000000002, 0.25, 0.2, 0.1]`.
@@ -438,19 +438,19 @@ Cargo.toml, pyproject.toml                    version -> release date
 
    Compare bits with `to_bits`, treating NaN positions separately. Confirm they
    fail, implement, and confirm they pass. Commit.
-5. Write failing tests for `rolling_max`, `rolling_min`, `shift`, `diff`, and
+- [x] 5. Write failing tests for `rolling_max`, `rolling_min`, `shift`, `diff`, and
    `clip_lower`: max window 2 over `[1, NaN, 3, 2]` is `[nan, nan, nan, 3]`;
    Donchian's composition over `high = [1, 3, 2, 5, 4]` and `low = [0, 1, 1, 2,
    3]` with period 2 gives upper `[nan, nan, 3, 3, 5]` and lower `[nan, nan, 0,
    1, 1]`; `clip_lower(-0.0, 0.0)` keeps -0.0. Confirm they fail, implement,
    and confirm they pass. Commit.
-6. Write failing tests for `ewm_mean`: SMMA (`com_from_alpha_period(2)`,
+- [x] 6. Write failing tests for `ewm_mean`: SMMA (`com_from_alpha_period(2)`,
    `min_periods` 0) over `[1, NaN, 3, 4]` is `[1, 1, 2.5, 3.25]`; EMA span 4 is
    `[1, 1, 2.0526315789473686, 2.8315789473684214]`; span 3 equals the SMMA
    period-2 result; leading NaNs stay NaN until the first observation; an
    `inf` is carried like NaN. Confirm they fail, implement, and confirm they
    pass. Commit.
-7. Write failing tests for `rolling_linear_wma`: window 2 over `[1, 2, inf, 3,
+- [x] 7. Write failing tests for `rolling_linear_wma`: window 2 over `[1, 2, inf, 3,
    4]` is `[nan, 1.6666666666666667, nan, nan, 3.6666666666666665]`; window 1
    is the identity; a 40-element window-20 case matches the sequential literal
    computed in Python. Confirm they fail, implement, and confirm they pass.
