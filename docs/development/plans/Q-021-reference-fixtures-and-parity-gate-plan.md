@@ -735,7 +735,7 @@ q-indicators  ───►  (none)            [dev: q-parity]
    `Family`, `FAMILIES`, and `detect_environment`, and confirm they pass.
    Add `fixtures-backend` and `fixtures-backend-check` and confirm both
    print the no-op message with `BACKEND_FAMILIES` empty. Commit.
-- [ ] 12. Write failing tests in `gate.rs` over an in-memory `ReferenceSet` of `test.`
+- [x] 12. Write failing tests in `gate.rs` over an in-memory `ReferenceSet` of `test.`
    fixtures, pinned rev `"a" * 40`:
    - All bound and nothing pending passes.
    - An empty binding table with an empty pending list gives one `Unaccounted`

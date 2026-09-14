@@ -442,6 +442,19 @@ pub fn run_gate(
                     }
                 }
                 crate::fixture::Expected::Outputs(outputs) => {
+                    // First run: check for UnexpectedError
+                    let actual = match kernel(&kernel_inputs, &case.params) {
+                        Ok(act) => act,
+                        Err(e) => {
+                            failures.push(GateFailure::UnexpectedError {
+                                function_id: fid.to_string(),
+                                case_id: case.case_id.clone(),
+                                message: e.message,
+                            });
+                            continue;
+                        }
+                    };
+
                     // Double-run check
                     if let Err((out_name, idx)) =
                         crate::determinism::check_double_run(kernel, &kernel_inputs, &case.params)
@@ -474,25 +487,14 @@ pub fn run_gate(
                     }
 
                     // Golden output comparison
-                    match kernel(&kernel_inputs, &case.params) {
-                        Ok(actual) => {
-                            if let Err(mismatch) =
-                                crate::compare::compare_outputs(&fixture.policy, outputs, &actual)
-                            {
-                                failures.push(GateFailure::Golden {
-                                    function_id: fid.to_string(),
-                                    case_id: case.case_id.clone(),
-                                    mismatch,
-                                });
-                            }
-                        }
-                        Err(e) => {
-                            failures.push(GateFailure::UnexpectedError {
-                                function_id: fid.to_string(),
-                                case_id: case.case_id.clone(),
-                                message: e.message,
-                            });
-                        }
+                    if let Err(mismatch) =
+                        crate::compare::compare_outputs(&fixture.policy, outputs, &actual)
+                    {
+                        failures.push(GateFailure::Golden {
+                            function_id: fid.to_string(),
+                            case_id: case.case_id.clone(),
+                            mismatch,
+                        });
                     }
                 }
             }
@@ -617,6 +619,402 @@ mod tests {
         static CTR: AtomicI64 = AtomicI64::new(0);
         let err = check_double_run_with(|| vec![CTR.fetch_add(1, Ordering::SeqCst)]);
         assert!(err.is_err());
+    }
+
+    fn make_test_reference_set(rev: &str, with_rejected_case: bool) -> ReferenceSet {
+        use crate::fixture::{Case, ColumnRef, Expected, FunctionFixture, InputSet, Provenance};
+
+        let mut inputs = BTreeMap::new();
+        let mut input_cols = BTreeMap::new();
+        let input_vals = vec![1.0, 2.0, 3.0];
+        let bits = fnv1a64_float64(&input_vals);
+        input_cols.insert(
+            "val".to_string(),
+            Column {
+                data: ColumnData::Float64(input_vals.clone()),
+                bits_fnv1a64: bits,
+            },
+        );
+        inputs.insert(
+            "test_in".to_string(),
+            InputSet {
+                input_id: "test_in".to_string(),
+                backend_rev: rev.to_string(),
+                columns: input_cols,
+            },
+        );
+
+        let mut functions = BTreeMap::new();
+        let mut cases = Vec::new();
+
+        let mut in_refs = BTreeMap::new();
+        in_refs.insert(
+            "in".to_string(),
+            ColumnRef {
+                input_id: "test_in".to_string(),
+                column: "val".to_string(),
+            },
+        );
+
+        let mut exp_outputs = BTreeMap::new();
+        exp_outputs.insert(
+            "out".to_string(),
+            Column {
+                data: ColumnData::Float64(input_vals),
+                bits_fnv1a64: bits,
+            },
+        );
+
+        cases.push(Case {
+            case_id: "case_valid".to_string(),
+            inputs: in_refs.clone(),
+            params: Params::new(),
+            expected: Expected::Outputs(exp_outputs),
+        });
+
+        if with_rejected_case {
+            cases.push(Case {
+                case_id: "case_invalid".to_string(),
+                inputs: in_refs,
+                params: Params::new(),
+                expected: Expected::Rejected {
+                    python_exception: "ValueError".to_string(),
+                },
+            });
+        }
+
+        functions.insert(
+            "test.identity".to_string(),
+            FunctionFixture {
+                function_id: "test.identity".to_string(),
+                policy: Policy::AbsRelTol {
+                    abs: 1e-10,
+                    rel: 1e-12,
+                },
+                provenance: Provenance {
+                    backend_repo: "https://example.com/repo.git".to_string(),
+                    backend_rev: rev.to_string(),
+                    source_path: "path.py".to_string(),
+                    source_blob: "blob".to_string(),
+                    exporter: "exp.py".to_string(),
+                    numpy: "2.4.4".to_string(),
+                    pandas: "3.0.2".to_string(),
+                    cpu_level: "x86-64-v3".to_string(),
+                },
+                cases,
+            },
+        );
+
+        ReferenceSet { inputs, functions }
+    }
+
+    fn test_identity_kernel(
+        inputs: &KernelInputs<'_>,
+        _params: &Params,
+    ) -> Result<KernelOutputs, KernelError> {
+        let col = inputs.column("in")?;
+        let mut out = KernelOutputs::new();
+        out.insert("out", col.to_vec());
+        Ok(out)
+    }
+
+    fn test_perturbed_kernel(
+        inputs: &KernelInputs<'_>,
+        _params: &Params,
+    ) -> Result<KernelOutputs, KernelError> {
+        let col = inputs.column("in")?;
+        let mut out_vec = col.to_vec();
+        if !out_vec.is_empty() {
+            out_vec[0] += 2e-10;
+        }
+        let mut out = KernelOutputs::new();
+        out.insert("out", out_vec);
+        Ok(out)
+    }
+
+    fn test_counter_kernel(
+        inputs: &KernelInputs<'_>,
+        _params: &Params,
+    ) -> Result<KernelOutputs, KernelError> {
+        use std::sync::atomic::{AtomicU64, Ordering};
+        static CTR: AtomicU64 = AtomicU64::new(0);
+        let col = inputs.column("in")?;
+        let mut out_vec = col.to_vec();
+        if !out_vec.is_empty() {
+            out_vec[0] += CTR.fetch_add(1, Ordering::SeqCst) as f64;
+        }
+        let mut out = KernelOutputs::new();
+        out.insert("out", out_vec);
+        Ok(out)
+    }
+
+    fn test_next_bar_kernel(
+        inputs: &KernelInputs<'_>,
+        _params: &Params,
+    ) -> Result<KernelOutputs, KernelError> {
+        let col = inputs.column("in")?;
+        let n = col.len();
+        let mut out_vec = Vec::with_capacity(n);
+        for i in 0..n {
+            if i + 1 < n {
+                out_vec.push(col[i + 1]);
+            } else {
+                out_vec.push(f64::NAN);
+            }
+        }
+        let mut out = KernelOutputs::new();
+        out.insert("out", out_vec);
+        Ok(out)
+    }
+
+    #[test]
+    fn test_gate_all_bound_and_nothing_pending_passes() {
+        let rev = "a".repeat(40);
+        let ref_set = make_test_reference_set(&rev, false);
+        let bindings = [Binding {
+            function_id: "test.identity",
+            kernel: test_identity_kernel,
+        }];
+        let pending = Pending::new();
+
+        let report = run_gate(&ref_set, &bindings, &pending, &rev);
+        assert_eq!(report.bound, vec!["test.identity"]);
+        assert!(report.pending.is_empty());
+        assert!(report.failures.is_empty());
+        report.assert_passed();
+    }
+
+    #[test]
+    fn test_gate_empty_bindings_and_pending_gives_unaccounted() {
+        let rev = "a".repeat(40);
+        let ref_set = make_test_reference_set(&rev, false);
+        let report = run_gate(&ref_set, &[], &Pending::new(), &rev);
+
+        assert_eq!(
+            report.failures,
+            vec![GateFailure::Unaccounted {
+                function_id: "test.identity".to_string()
+            }]
+        );
+    }
+
+    #[test]
+    fn test_gate_pending_but_bound() {
+        let rev = "a".repeat(40);
+        let ref_set = make_test_reference_set(&rev, false);
+        let bindings = [Binding {
+            function_id: "test.identity",
+            kernel: test_identity_kernel,
+        }];
+        let pending = parse_pending("test.identity").unwrap();
+
+        let report = run_gate(&ref_set, &bindings, &pending, &rev);
+        assert!(report.failures.contains(&GateFailure::PendingButBound {
+            function_id: "test.identity".to_string()
+        }));
+    }
+
+    #[test]
+    fn test_gate_pending_unknown() {
+        let rev = "a".repeat(40);
+        let ref_set = make_test_reference_set(&rev, false);
+        let bindings = [Binding {
+            function_id: "test.identity",
+            kernel: test_identity_kernel,
+        }];
+        let pending = parse_pending("unknown.function").unwrap();
+
+        let report = run_gate(&ref_set, &bindings, &pending, &rev);
+        assert!(report.failures.contains(&GateFailure::PendingUnknown {
+            function_id: "unknown.function".to_string()
+        }));
+    }
+
+    #[test]
+    fn test_gate_bound_unknown() {
+        let rev = "a".repeat(40);
+        let ref_set = make_test_reference_set(&rev, false);
+        let bindings = [
+            Binding {
+                function_id: "test.identity",
+                kernel: test_identity_kernel,
+            },
+            Binding {
+                function_id: "unknown.function",
+                kernel: test_identity_kernel,
+            },
+        ];
+        let pending = Pending::new();
+
+        let report = run_gate(&ref_set, &bindings, &pending, &rev);
+        assert!(report.failures.contains(&GateFailure::BoundUnknown {
+            function_id: "unknown.function".to_string()
+        }));
+    }
+
+    #[test]
+    fn test_gate_duplicate_binding() {
+        let rev = "a".repeat(40);
+        let ref_set = make_test_reference_set(&rev, false);
+        let bindings = [
+            Binding {
+                function_id: "test.identity",
+                kernel: test_identity_kernel,
+            },
+            Binding {
+                function_id: "test.identity",
+                kernel: test_identity_kernel,
+            },
+        ];
+        let pending = Pending::new();
+
+        let report = run_gate(&ref_set, &bindings, &pending, &rev);
+        assert!(report.failures.contains(&GateFailure::DuplicateBinding {
+            function_id: "test.identity".to_string()
+        }));
+    }
+
+    #[test]
+    fn test_gate_provenance_rev_mismatch() {
+        let rev = "a".repeat(40);
+        let pinned = "b".repeat(40);
+        let ref_set = make_test_reference_set(&rev, false);
+        let bindings = [Binding {
+            function_id: "test.identity",
+            kernel: test_identity_kernel,
+        }];
+        let pending = Pending::new();
+
+        let report = run_gate(&ref_set, &bindings, &pending, &pinned);
+        assert!(report.failures.contains(&GateFailure::ProvenanceRev {
+            file: "test.identity".to_string(),
+            recorded: rev,
+            pinned,
+        }));
+    }
+
+    #[test]
+    fn test_gate_golden_mismatch() {
+        let rev = "a".repeat(40);
+        let ref_set = make_test_reference_set(&rev, false);
+        let bindings = [Binding {
+            function_id: "test.identity",
+            kernel: test_perturbed_kernel,
+        }];
+        let pending = Pending::new();
+
+        let report = run_gate(&ref_set, &bindings, &pending, &rev);
+        assert!(report
+            .failures
+            .iter()
+            .any(|f| matches!(f, GateFailure::Golden { .. })));
+    }
+
+    #[test]
+    fn test_gate_accepted_rejected_case() {
+        let rev = "a".repeat(40);
+        let ref_set = make_test_reference_set(&rev, true);
+        let bindings = [Binding {
+            function_id: "test.identity",
+            kernel: test_identity_kernel, // Accepts invalid case
+        }];
+        let pending = Pending::new();
+
+        let report = run_gate(&ref_set, &bindings, &pending, &rev);
+        assert!(report
+            .failures
+            .contains(&GateFailure::AcceptedRejectedCase {
+                function_id: "test.identity".to_string(),
+                case_id: "case_invalid".to_string(),
+                python_exception: "ValueError".to_string(),
+            }));
+    }
+
+    #[test]
+    fn test_gate_nondeterministic() {
+        let rev = "a".repeat(40);
+        let ref_set = make_test_reference_set(&rev, false);
+        let bindings = [Binding {
+            function_id: "test.identity",
+            kernel: test_counter_kernel,
+        }];
+        let pending = Pending::new();
+
+        let report = run_gate(&ref_set, &bindings, &pending, &rev);
+        assert!(report
+            .failures
+            .iter()
+            .any(|f| matches!(f, GateFailure::Nondeterministic { .. })));
+    }
+
+    #[test]
+    fn test_gate_non_causal() {
+        let rev = "a".repeat(40);
+        let ref_set = make_test_reference_set(&rev, false);
+        let bindings = [Binding {
+            function_id: "test.identity",
+            kernel: test_next_bar_kernel,
+        }];
+        let pending = Pending::new();
+
+        let report = run_gate(&ref_set, &bindings, &pending, &rev);
+        assert!(report
+            .failures
+            .iter()
+            .any(|f| matches!(f, GateFailure::NonCausal { .. })));
+    }
+
+    #[test]
+    fn test_gate_report_summary() {
+        let report = GateReport {
+            bound: vec!["b1".to_string()],
+            pending: vec!["p1".to_string()],
+            failures: vec![GateFailure::Unaccounted {
+                function_id: "f1".to_string(),
+            }],
+        };
+        let s = report.summary();
+        assert!(s.starts_with("reference gate: 1 bound, 1 pending, 1 failures"));
+        assert!(s.contains("unaccounted fixture: 'f1'"));
+    }
+
+    fn test_error_kernel(
+        _inputs: &KernelInputs<'_>,
+        _params: &Params,
+    ) -> Result<KernelOutputs, KernelError> {
+        Err(KernelError {
+            message: "computation failed".to_string(),
+        })
+    }
+
+    #[test]
+    fn test_gate_unexpected_error() {
+        let rev = "a".repeat(40);
+        let ref_set = make_test_reference_set(&rev, false);
+        let bindings = [Binding {
+            function_id: "test.identity",
+            kernel: test_error_kernel,
+        }];
+        let pending = Pending::new();
+
+        let report = run_gate(&ref_set, &bindings, &pending, &rev);
+        assert!(report
+            .failures
+            .iter()
+            .any(|f| matches!(f, GateFailure::UnexpectedError { .. })));
+    }
+
+    #[test]
+    fn test_parse_pending() {
+        let text = "# comment\n\nfn1\nfn2 # inline comment\n";
+        let pending = parse_pending(text).unwrap();
+        assert_eq!(pending.len(), 2);
+        assert!(pending.contains("fn1"));
+        assert!(pending.contains("fn2"));
+
+        let dup_text = "fn1\nfn1\n";
+        let err = parse_pending(dup_text).unwrap_err();
+        assert!(err.contains("duplicate pending id 'fn1'"));
     }
 
     fn tempfile_dir(name: &str) -> PathBuf {
