@@ -782,10 +782,10 @@ q-indicators  ───►  (none)            [dev: q-parity]
    locate the provenance, the `synthetic_ohlcv_n400/period=14` warm-up NaNs
    at indices 0 to 13, the `monotonic_up_n60/period=14` value `100.0`, and
    the `period=0` rejection.
-- [ ] 18. Human step, matching human-verifiable criterion 3: push the branch and
+- [x] 18. Human step, matching human-verifiable criterion 3: push the branch and
    watch the CI run. Record the wall-clock time of the `make check` step
    against the last `development` run.
-- [ ] 19. Run the full validation suite and commit. Report the handoff.
+- [x] 19. Run the full validation suite and commit. Report the handoff.
 
 ## Validation
 
