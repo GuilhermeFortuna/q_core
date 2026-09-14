@@ -498,6 +498,48 @@ fn ewm_fuse_update(old_wt: f64, weighted: f64, new_wt: f64, cur: f64) -> f64 {
     out
 }
 
+/// Sequential linear weighted moving average: `sum(x[k]*(k+1)) / (w*(w+1)/2)`.
+///
+/// A window is NaN unless `i >= w - 1` and all `w` values are finite after prep.
+#[expect(
+    clippy::suboptimal_flops,
+    reason = "pandas evaluates a*b+c unfused; mul_add changes the result bits"
+)]
+pub(crate) fn rolling_linear_wma(values: &[f64], window: usize) -> Vec<f64> {
+    let n = values.len();
+    let mut output = vec![f64::NAN; n];
+    if n == 0 || window == 0 {
+        return output;
+    }
+    let values = prep_values(values);
+    let denom = (window * (window + 1) / 2) as f64;
+
+    for i in 0..n {
+        if i + 1 < window {
+            continue;
+        }
+        let start = i + 1 - window;
+        let end = i + 1;
+        let mut all_finite = true;
+        for &x in &values[start..end] {
+            if !ieee_eq(x, x) {
+                all_finite = false;
+                break;
+            }
+        }
+        if !all_finite {
+            continue;
+        }
+        let mut acc = 0.0;
+        for (k, &x) in values[start..end].iter().enumerate() {
+            acc += x * ((k + 1) as f64);
+        }
+        output[i] = acc / denom;
+    }
+
+    output
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -650,5 +692,77 @@ mod tests {
         let with_nan = ewm_mean(&[1.0, f64::NAN, 3.0, 4.0], com_from_alpha_period(2), 0);
         let with_inf = ewm_mean(&[1.0, f64::INFINITY, 3.0, 4.0], com_from_alpha_period(2), 0);
         assert_bits_eq(&with_inf, &with_nan);
+    }
+
+    #[test]
+    fn rolling_linear_wma_window2_with_inf() {
+        let got = rolling_linear_wma(&[1.0, 2.0, f64::INFINITY, 3.0, 4.0], 2);
+        assert_bits_eq(
+            &got,
+            &[
+                f64::NAN,
+                1.6666666666666667,
+                f64::NAN,
+                f64::NAN,
+                3.6666666666666665,
+            ],
+        );
+    }
+
+    #[test]
+    fn rolling_linear_wma_window1_is_identity() {
+        let values = [1.5, -2.0, 3.25, 0.0];
+        let got = rolling_linear_wma(&values, 1);
+        assert_bits_eq(&got, &values);
+    }
+
+    #[test]
+    fn rolling_linear_wma_window20_arange40_matches_python_sequential() {
+        let values: Vec<f64> = (1..=40).map(|x| x as f64).collect();
+        let got = rolling_linear_wma(&values, 20);
+        // Embedded from a sequential Python sum x[k]*(k+1) / 210 over series 1..=40.
+        let expected: [f64; 40] = [
+            f64::NAN,
+            f64::NAN,
+            f64::NAN,
+            f64::NAN,
+            f64::NAN,
+            f64::NAN,
+            f64::NAN,
+            f64::NAN,
+            f64::NAN,
+            f64::NAN,
+            f64::NAN,
+            f64::NAN,
+            f64::NAN,
+            f64::NAN,
+            f64::NAN,
+            f64::NAN,
+            f64::NAN,
+            f64::NAN,
+            f64::NAN,
+            f64::from_bits(0x402b_5555_5555_5555),
+            f64::from_bits(0x402d_5555_5555_5555),
+            f64::from_bits(0x402f_5555_5555_5555),
+            f64::from_bits(0x4030_aaaa_aaaa_aaab),
+            f64::from_bits(0x4031_aaaa_aaaa_aaab),
+            f64::from_bits(0x4032_aaaa_aaaa_aaab),
+            f64::from_bits(0x4033_aaaa_aaaa_aaab),
+            f64::from_bits(0x4034_aaaa_aaaa_aaab),
+            f64::from_bits(0x4035_aaaa_aaaa_aaab),
+            f64::from_bits(0x4036_aaaa_aaaa_aaab),
+            f64::from_bits(0x4037_aaaa_aaaa_aaab),
+            f64::from_bits(0x4038_aaaa_aaaa_aaab),
+            f64::from_bits(0x4039_aaaa_aaaa_aaab),
+            f64::from_bits(0x403a_aaaa_aaaa_aaab),
+            f64::from_bits(0x403b_aaaa_aaaa_aaab),
+            f64::from_bits(0x403c_aaaa_aaaa_aaab),
+            f64::from_bits(0x403d_aaaa_aaaa_aaab),
+            f64::from_bits(0x403e_aaaa_aaaa_aaab),
+            f64::from_bits(0x403f_aaaa_aaaa_aaab),
+            f64::from_bits(0x4040_5555_5555_5555),
+            f64::from_bits(0x4040_d555_5555_5555),
+        ];
+        assert_bits_eq(&got, &expected);
     }
 }
