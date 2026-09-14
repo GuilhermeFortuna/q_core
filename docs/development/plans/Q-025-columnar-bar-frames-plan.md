@@ -542,19 +542,19 @@ fn replay(file: &q_parity::fixture::FixtureFile) -> Result<WindowTrace, String>;
 
 ## Ordered implementation
 
-1. Work on the branch `Q-025-columnar-bar-frames` in `q_core`, created from
+1. [x] Work on the branch `Q-025-columnar-bar-frames` in `q_core`, created from
    `development` by `./work start`. Confirm that Q-021's
    `fixtures/reference/`, `tools/reference/export_reference.py` with
    `FAMILIES`, `crates/q-parity`, and the `fixtures-backend` and
    `fixtures-backend-check` targets are present on `development`. Record
    `BACKEND_REV` and confirm it predates Q-023.
-2. Extend `make contracts` to copy
+2. [x] Extend `make contracts` to copy
    `schema/api/arrow/bars.schema.json` into `contracts/schema/api/arrow/`. In
    `contracts-check`, add `--exclude=schema` to the Rust `diff -ru` and add a
    `diff` of the vendored JSON against the checkout's copy. Run
    `make contracts`, and confirm `make contracts-check` is clean. Then edit the
    vendored JSON, confirm `contracts-check` fails, and revert. Commit.
-3. Write failing tests in `q-buffers/src/column.rs`:
+3. [x] Write failing tests in `q-buffers/src/column.rs`:
    - `Bitmap::from_bools` of `[true, false, true, true, false, false, false,
      false, true, true]` has `as_bytes() == [0b0000_1101, 0b0000_0011]`;
    - `get(9)` is `true`;
@@ -565,7 +565,7 @@ fn replay(file: &q_parity::fixture::FixtureFile) -> Result<WindowTrace, String>;
    - `bytes_eq` of `0.0` against `-0.0` is `false`.
 
    Confirm they fail, implement, and confirm they pass. Commit.
-4. Write failing tests in `frame.rs`:
+4. [x] Write failing tests in `frame.rs`:
    - `try_new` with times `[0, 3_600_000_000, 7_200_000_000]` succeeds with
      `len() == 3`;
    - times `[0, 0]` give `NonIncreasingTime { index: 1 }`;
@@ -580,7 +580,7 @@ fn replay(file: &q_parity::fixture::FixtureFile) -> Result<WindowTrace, String>;
    - `TimeLabel::parse("America/Sao_Paulo")` gives `UnknownTimeLabel`.
 
    Confirm they fail, implement, and confirm they pass. Commit.
-5. Write a failing contract test in `frame.rs`: load
+5. [x] Write a failing contract test in `frame.rs`: load
    `contracts/schema/api/arrow/bars.schema.json` with `serde_json` (test-only
    `include_str!`). Assert that `schema()` of a frame with all three volume
    columns equals the JSON `fields` on `name`, `type`, `nullable` and `tz`, in
@@ -588,7 +588,7 @@ fn replay(file: &q_parity::fixture::FixtureFile) -> Result<WindowTrace, String>;
    `time` field's `tz`. Confirm it fails, implement `schema()`, and confirm it
    passes. Change `close` to `float32` in the vendored copy, confirm the test
    fails, and revert. Commit.
-6. Write failing tests in `window.rs` for the merge, one per Q-025 fixture
+6. [x] Write failing tests in `window.rs` for the merge, one per Q-025 fixture
    scenario above, with hand-built inputs and expected times. Also add:
    - `new(0, …)` gives `ZeroBound`;
    - a batch with `spread: Some` into a window created without spread gives
@@ -598,7 +598,7 @@ fn replay(file: &q_parity::fixture::FixtureFile) -> Result<WindowTrace, String>;
 
    Confirm they fail. Implement the fast path and the stable-sort merge, then
    confirm they pass. Commit.
-7. Write failing forming-bar tests in `window.rs`:
+7. [x] Write failing forming-bar tests in `window.rs`:
    - with completed bars ending at t=10h, `set_forming` at 11h makes
      `forming().time() == [11h]` and `len()` unchanged;
    - a second `set_forming` at 11h with a different close replaces it;

@@ -13,7 +13,17 @@ pub mod contracts {
     pub mod stream;
 }
 
-/// The crate's build identity. The only public item until the first kernel lands.
+pub mod column;
+pub mod frame;
+pub mod window;
+
+pub use column::{Bitmap, Column, ColumnType};
+pub use frame::{
+    BarColumns, BarFrame, FieldDesc, FrameError, TimeLabel, VolumeSet, RESERVED_COLUMNS,
+};
+pub use window::RollingBarWindow;
+
+/// The crate's build identity.
 pub const CRATE_NAME: &str = "q-buffers";
 
 #[cfg(test)]
