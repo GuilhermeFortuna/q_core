@@ -6,6 +6,7 @@
 
 mod error;
 mod ieee;
+mod window;
 
 pub use error::IndicatorError;
 

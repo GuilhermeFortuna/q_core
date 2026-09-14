@@ -1,0 +1,463 @@
+//! Pandas FixedWindowIndexer rolling primitives (mean, var, std).
+//!
+//! These `pub(crate)` kernels are only called from unit tests until public
+//! indicator wrappers land; keep them despite crate-level dead_code.
+
+#![allow(dead_code)]
+#![allow(clippy::needless_range_loop)]
+
+use crate::ieee::{ieee_eq, window_missing};
+
+/// Map ±inf to NaN the way pandas `BaseWindow._prep_values` does.
+fn prep_values(values: &[f64]) -> Vec<f64> {
+    values
+        .iter()
+        .map(|&x| if window_missing(x) { f64::NAN } else { x })
+        .collect()
+}
+
+fn fixed_bounds(i: usize, window: usize) -> (usize, usize) {
+    let end = i + 1;
+    let start = end.saturating_sub(window);
+    (start, end)
+}
+
+fn calc_mean(
+    minp: usize,
+    nobs: usize,
+    neg_ct: usize,
+    sum_x: f64,
+    num_consecutive_same_value: i64,
+    prev_value: f64,
+) -> f64 {
+    if nobs >= minp && nobs > 0 {
+        let mut result = sum_x / (nobs as f64);
+        if num_consecutive_same_value >= nobs as i64 {
+            result = prev_value;
+        } else if (neg_ct == 0 && result < 0.0) || (neg_ct == nobs && result > 0.0) {
+            // Signbit clamp: all-positive must not go negative, and vice versa.
+            result = 0.0;
+        }
+        result
+    } else {
+        f64::NAN
+    }
+}
+
+fn add_mean(
+    val: f64,
+    nobs: &mut usize,
+    sum_x: &mut f64,
+    neg_ct: &mut usize,
+    compensation: &mut f64,
+    num_consecutive_same_value: &mut i64,
+    prev_value: &mut f64,
+) {
+    // Not NaN (C ==)
+    if ieee_eq(val, val) {
+        *nobs += 1;
+        let y = val - *compensation;
+        let t = *sum_x + y;
+        *compensation = t - *sum_x - y;
+        *sum_x = t;
+        if val.is_sign_negative() {
+            *neg_ct += 1;
+        }
+        if ieee_eq(val, *prev_value) {
+            *num_consecutive_same_value += 1;
+        } else {
+            *num_consecutive_same_value = 1;
+            *prev_value = val;
+        }
+    }
+}
+
+fn remove_mean(
+    val: f64,
+    nobs: &mut usize,
+    sum_x: &mut f64,
+    neg_ct: &mut usize,
+    compensation: &mut f64,
+) {
+    if ieee_eq(val, val) {
+        *nobs -= 1;
+        let y = -val - *compensation;
+        let t = *sum_x + y;
+        *compensation = t - *sum_x - y;
+        *sum_x = t;
+        if val.is_sign_negative() {
+            *neg_ct -= 1;
+        }
+    }
+}
+
+/// Pandas `roll_mean` with FixedWindowIndexer bounds and `min_periods = window`.
+pub(crate) fn rolling_mean(values: &[f64], window: usize) -> Vec<f64> {
+    let n = values.len();
+    let mut output = vec![f64::NAN; n];
+    if n == 0 {
+        return output;
+    }
+    let values = prep_values(values);
+    let minp = window;
+    // Fixed monotonic windows: always true for FixedWindowIndexer.
+    let is_monotonic_increasing_bounds = true;
+
+    let mut compensation_add = 0.0;
+    let mut compensation_remove = 0.0;
+    let mut sum_x = 0.0;
+    let mut nobs: usize = 0;
+    let mut neg_ct: usize = 0;
+    let mut prev_value = 0.0;
+    let mut num_consecutive_same_value: i64 = 0;
+    let mut prev_start = 0usize;
+    let mut prev_end = 0usize;
+
+    for i in 0..n {
+        let (s, e) = fixed_bounds(i, window);
+
+        if i == 0 || !is_monotonic_increasing_bounds || s >= prev_end {
+            compensation_add = 0.0;
+            compensation_remove = 0.0;
+            sum_x = 0.0;
+            nobs = 0;
+            neg_ct = 0;
+            // Guard values[s] when the window is empty (window 0) or s is past the end.
+            prev_value = if s < e && s < values.len() {
+                values[s]
+            } else {
+                0.0
+            };
+            num_consecutive_same_value = 0;
+            for j in s..e {
+                add_mean(
+                    values[j],
+                    &mut nobs,
+                    &mut sum_x,
+                    &mut neg_ct,
+                    &mut compensation_add,
+                    &mut num_consecutive_same_value,
+                    &mut prev_value,
+                );
+            }
+        } else {
+            for j in prev_start..s {
+                remove_mean(
+                    values[j],
+                    &mut nobs,
+                    &mut sum_x,
+                    &mut neg_ct,
+                    &mut compensation_remove,
+                );
+            }
+            for j in prev_end..e {
+                add_mean(
+                    values[j],
+                    &mut nobs,
+                    &mut sum_x,
+                    &mut neg_ct,
+                    &mut compensation_add,
+                    &mut num_consecutive_same_value,
+                    &mut prev_value,
+                );
+            }
+        }
+
+        output[i] = calc_mean(
+            minp,
+            nobs,
+            neg_ct,
+            sum_x,
+            num_consecutive_same_value,
+            prev_value,
+        );
+
+        if !is_monotonic_increasing_bounds {
+            nobs = 0;
+            neg_ct = 0;
+            sum_x = 0.0;
+            compensation_remove = 0.0;
+        }
+
+        prev_start = s;
+        prev_end = e;
+    }
+
+    output
+}
+
+const INV_COND_TOL: f64 = f64::EPSILON * 1e3;
+
+fn calc_var(minp: usize, ddof: i32, nobs: f64, ssqdm_x: f64) -> f64 {
+    if nobs >= minp as f64 && nobs > f64::from(ddof) {
+        ssqdm_x / (nobs - f64::from(ddof))
+    } else {
+        f64::NAN
+    }
+}
+
+#[expect(
+    clippy::suboptimal_flops,
+    reason = "pandas evaluates a*b+c unfused; mul_add changes the result bits"
+)]
+fn add_var(
+    val: f64,
+    nobs: &mut f64,
+    mean_x: &mut f64,
+    ssqdm_x: &mut f64,
+    compensation: &mut f64,
+    numerically_unstable: &mut bool,
+) {
+    // GH#21813: use != NaN check via C inequality
+    if !ieee_eq(val, val) {
+        return;
+    }
+
+    *nobs += 1.0;
+
+    let prev_m2 = *ssqdm_x;
+    let prev_mean = *mean_x - *compensation;
+    let y = val - *compensation;
+    let t = y - *mean_x;
+    *compensation = t + *mean_x - y;
+    let delta = t;
+    if *nobs != 0.0 {
+        *mean_x += delta / *nobs;
+    } else {
+        *mean_x = 0.0;
+    }
+    *ssqdm_x += (val - prev_mean) * (val - *mean_x);
+
+    if prev_m2 * INV_COND_TOL > *ssqdm_x {
+        *numerically_unstable = true;
+    }
+}
+
+#[expect(
+    clippy::suboptimal_flops,
+    reason = "pandas evaluates a*b+c unfused; mul_add changes the result bits"
+)]
+fn remove_var(
+    val: f64,
+    nobs: &mut f64,
+    mean_x: &mut f64,
+    ssqdm_x: &mut f64,
+    compensation: &mut f64,
+    numerically_unstable: &mut bool,
+) {
+    if ieee_eq(val, val) {
+        *nobs -= 1.0;
+        if *nobs != 0.0 {
+            let prev_m2 = *ssqdm_x;
+            let prev_mean = *mean_x - *compensation;
+            let y = val - *compensation;
+            let t = y - *mean_x;
+            *compensation = t + *mean_x - y;
+            let delta = t;
+            *mean_x -= delta / *nobs;
+            *ssqdm_x -= (val - prev_mean) * (val - *mean_x);
+
+            if prev_m2 * INV_COND_TOL > *ssqdm_x {
+                *numerically_unstable = true;
+            }
+        } else {
+            *mean_x = 0.0;
+            *ssqdm_x = 0.0;
+            *numerically_unstable = false;
+        }
+    }
+}
+
+/// Pandas `roll_var` with FixedWindowIndexer, `ddof = 1`, `min_periods = max(window, 1)`.
+pub(crate) fn rolling_var(values: &[f64], window: usize) -> Vec<f64> {
+    let n = values.len();
+    let mut output = vec![f64::NAN; n];
+    if n == 0 {
+        return output;
+    }
+    let values = prep_values(values);
+    let minp = window.max(1);
+    let ddof = 1;
+    let is_monotonic_increasing_bounds = true;
+
+    let mut mean_x = 0.0;
+    let mut ssqdm_x = 0.0;
+    let mut nobs = 0.0;
+    let mut compensation_add = 0.0;
+    let mut compensation_remove = 0.0;
+    let mut numerically_unstable = false;
+    let mut prev_start = 0usize;
+    let mut prev_end = 0usize;
+
+    for i in 0..n {
+        let (s, e) = fixed_bounds(i, window);
+
+        let requires_recompute = i == 0 || !is_monotonic_increasing_bounds || s >= prev_end;
+
+        if !requires_recompute {
+            for j in prev_start..s {
+                remove_var(
+                    values[j],
+                    &mut nobs,
+                    &mut mean_x,
+                    &mut ssqdm_x,
+                    &mut compensation_remove,
+                    &mut numerically_unstable,
+                );
+            }
+            for j in prev_end..e {
+                add_var(
+                    values[j],
+                    &mut nobs,
+                    &mut mean_x,
+                    &mut ssqdm_x,
+                    &mut compensation_add,
+                    &mut numerically_unstable,
+                );
+            }
+        }
+
+        if requires_recompute || numerically_unstable {
+            mean_x = 0.0;
+            ssqdm_x = 0.0;
+            nobs = 0.0;
+            compensation_add = 0.0;
+            compensation_remove = 0.0;
+            for j in s..e {
+                add_var(
+                    values[j],
+                    &mut nobs,
+                    &mut mean_x,
+                    &mut ssqdm_x,
+                    &mut compensation_add,
+                    &mut numerically_unstable,
+                );
+            }
+            numerically_unstable = false;
+        }
+
+        output[i] = calc_var(minp, ddof, nobs, ssqdm_x);
+
+        if !is_monotonic_increasing_bounds {
+            nobs = 0.0;
+            mean_x = 0.0;
+            ssqdm_x = 0.0;
+            compensation_remove = 0.0;
+        }
+
+        prev_start = s;
+        prev_end = e;
+    }
+
+    output
+}
+
+/// `zsqrt(rolling_var)`: sqrt with negatives clamped to 0.
+pub(crate) fn rolling_std(values: &[f64], window: usize) -> Vec<f64> {
+    rolling_var(values, window)
+        .into_iter()
+        .map(|v| if v < 0.0 { 0.0 } else { v.sqrt() })
+        .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn assert_bits_eq(actual: &[f64], expected: &[f64]) {
+        assert_eq!(actual.len(), expected.len(), "length mismatch");
+        for (i, (&a, &e)) in actual.iter().zip(expected.iter()).enumerate() {
+            if e.is_nan() {
+                assert!(a.is_nan(), "index {i}: expected NaN, got {a}");
+            } else {
+                assert_eq!(
+                    a.to_bits(),
+                    e.to_bits(),
+                    "index {i}: got {a} ({:#x}) expected {e} ({:#x})",
+                    a.to_bits(),
+                    e.to_bits()
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn rolling_mean_window2_small_decimals() {
+        let got = rolling_mean(&[0.1, 0.2, 0.3, 0.1, 0.1], 2);
+        assert_bits_eq(&got, &[f64::NAN, 0.15000000000000002, 0.25, 0.2, 0.1]);
+    }
+
+    #[test]
+    fn rolling_mean_window3_same_value_shortcut() {
+        let got = rolling_mean(&[1e16, 1.0, 1.0, 1.0], 3);
+        assert_bits_eq(&got, &[f64::NAN, f64::NAN, 3_333_333_333_333_334.0, 1.0]);
+    }
+
+    #[test]
+    fn rolling_mean_window2_large_then_small() {
+        let got = rolling_mean(&[1e16, 1.0, 2.0, -3.0], 2);
+        assert_bits_eq(&got, &[f64::NAN, 5e15, 1.5, -0.5]);
+    }
+
+    #[test]
+    fn rolling_var_window2_instability_recompute() {
+        let got = rolling_var(&[1e15, 1.0, 2.0, 4.0], 2);
+        assert_bits_eq(&got, &[f64::NAN, 4.99999999999999e29, 0.5, 2.0]);
+    }
+
+    #[test]
+    fn rolling_var_window3() {
+        let got = rolling_var(&[1e15, 1.0, 2.0, 4.0, 8.0], 3);
+        assert_bits_eq(
+            &got,
+            &[
+                f64::NAN,
+                f64::NAN,
+                3.333333333333323e29,
+                2.333333333333333,
+                9.333333333333332,
+            ],
+        );
+    }
+
+    #[test]
+    fn rolling_std_window2_constant() {
+        let got = rolling_std(&[3.0, 3.0, 3.0], 2);
+        assert_bits_eq(&got, &[f64::NAN, 0.0, 0.0]);
+    }
+
+    #[test]
+    fn rolling_std_window3_settles_to_zero() {
+        let got = rolling_std(&[0.1, 0.2, 0.3, 0.3, 0.3, 0.3], 3);
+        assert_bits_eq(
+            &got,
+            &[
+                f64::NAN,
+                f64::NAN,
+                0.09999999999999998,
+                0.05773502691896253,
+                0.0,
+                0.0,
+            ],
+        );
+    }
+
+    #[test]
+    fn rolling_mean_window0_all_nan() {
+        let got = rolling_mean(&[1.0, 2.0, 3.0], 0);
+        assert_bits_eq(&got, &[f64::NAN, f64::NAN, f64::NAN]);
+    }
+
+    #[test]
+    fn rolling_mean_inf_treated_as_nan() {
+        let got = rolling_mean(&[1.0, f64::INFINITY, 3.0], 2);
+        assert_bits_eq(&got, &[f64::NAN, f64::NAN, f64::NAN]);
+    }
+
+    #[test]
+    fn rolling_empty_input_empty_output() {
+        assert!(rolling_mean(&[], 2).is_empty());
+        assert!(rolling_var(&[], 2).is_empty());
+        assert!(rolling_std(&[], 2).is_empty());
+    }
+}

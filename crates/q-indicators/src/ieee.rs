@@ -9,14 +9,14 @@
     clippy::float_cmp,
     reason = "pandas window kernels use C == for same-value and NaN checks"
 )]
-#[allow(dead_code)] // used by window primitives in subsequent steps
+#[allow(dead_code)] // called from pub(crate) window kernels (test-only until public API)
 pub(crate) fn ieee_eq(a: f64, b: f64) -> bool {
     a == b
 }
 
 /// Pandas `BaseWindow._prep_values` missing: NaN or ±infinity.
 #[inline]
-#[allow(dead_code)] // used by window primitives in subsequent steps
+#[allow(dead_code)] // called from pub(crate) window kernels (test-only until public API)
 pub(crate) fn window_missing(x: f64) -> bool {
     x.is_nan() || x.is_infinite()
 }
