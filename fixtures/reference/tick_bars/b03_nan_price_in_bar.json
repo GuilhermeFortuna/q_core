@@ -1,0 +1,140 @@
+{
+ "cases": [
+  {
+   "case_id": "b03_nan_price_in_bar",
+   "expected": {
+    "close": {
+     "bits_fnv1a64": "0x4085486956a4c6c4",
+     "dtype": "float64",
+     "values": [
+      102.1
+     ]
+    },
+    "high": {
+     "bits_fnv1a64": "0xaa96293229a2e940",
+     "dtype": "float64",
+     "values": [
+      null
+     ]
+    },
+    "low": {
+     "bits_fnv1a64": "0xaa96293229a2e940",
+     "dtype": "float64",
+     "values": [
+      null
+     ]
+    },
+    "open": {
+     "bits_fnv1a64": "0xebc7c866e2a57144",
+     "dtype": "float64",
+     "values": [
+      100.1
+     ]
+    },
+    "open_msc": {
+     "bits_fnv1a64": "0xa8c7f832281a39c5",
+     "dtype": "int64",
+     "values": [
+      0
+     ]
+    },
+    "tick_end": {
+     "bits_fnv1a64": "0xc7c2bf3b330983e6",
+     "dtype": "int64",
+     "values": [
+      3
+     ]
+    },
+    "tick_start": {
+     "bits_fnv1a64": "0xa8c7f832281a39c5",
+     "dtype": "int64",
+     "values": [
+      0
+     ]
+    },
+    "volume": {
+     "bits_fnv1a64": "0xc7c2bf3b330983e6",
+     "dtype": "int64",
+     "values": [
+      3
+     ]
+    }
+   },
+   "inputs": {
+    "ask": {
+     "bits_fnv1a64": "0xb9541aa8c90a1f60",
+     "dtype": "float64",
+     "values": [
+      100.2,
+      null,
+      102.2
+     ]
+    },
+    "bar_ms": 60000,
+    "bid": {
+     "bits_fnv1a64": "0xea7c3d4ce6a142d0",
+     "dtype": "float64",
+     "values": [
+      100.0,
+      null,
+      102.0
+     ]
+    },
+    "last": {
+     "bits_fnv1a64": "0x81d23fd7003c2305",
+     "dtype": "float64",
+     "values": [
+      0.0,
+      0.0,
+      0.0
+     ]
+    },
+    "time_msc": {
+     "bits_fnv1a64": "0xbc5bfd314f416b91",
+     "dtype": "int64",
+     "values": [
+      0,
+      1000,
+      2000
+     ]
+    },
+    "volume": {
+     "bits_fnv1a64": "0x439bb40fbb1a9658",
+     "dtype": "float64",
+     "values": [
+      1.0,
+      1.0,
+      1.0
+     ]
+    }
+   },
+   "operation": "tick_bars",
+   "params": {}
+  }
+ ],
+ "family": "tick_bars",
+ "fixture_id": "b03_nan_price_in_bar",
+ "format": "q-core-reference-fixture/1",
+ "policy": {
+  "kind": "exact"
+ },
+ "provenance": {
+  "backend_repo": "https://github.com/GuilhermeFortuna/q_backend.git",
+  "backend_rev": "067e29cdf8db67d8b8c237599fced0b8eabb921f",
+  "environment": "backend",
+  "exporter": "tools/reference/export_reference.py",
+  "numpy": "2.4.4",
+  "pandas": "3.0.2",
+  "python": "3.13.15",
+  "sources": [
+   {
+    "blob": "5240e212f2a8493720de447e849c75695286c3f1",
+    "path": "src/q_backend/backtesting/tick/chart_data.py"
+   },
+   {
+    "blob": "562f795a7fceb04ce56d0aa054ab9c17eadee803",
+    "path": "tests/backtesting/test_goldens.py"
+   }
+  ]
+ }
+}

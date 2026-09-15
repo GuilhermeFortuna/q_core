@@ -1,0 +1,156 @@
+{
+ "cases": [
+  {
+   "case_id": "b07_out_of_order_ticks",
+   "expected": {
+    "close": {
+     "bits_fnv1a64": "0x155fab065f54ea88",
+     "dtype": "float64",
+     "values": [
+      100.1,
+      101.1,
+      102.1
+     ]
+    },
+    "high": {
+     "bits_fnv1a64": "0x155fab065f54ea88",
+     "dtype": "float64",
+     "values": [
+      100.1,
+      101.1,
+      102.1
+     ]
+    },
+    "low": {
+     "bits_fnv1a64": "0x155fab065f54ea88",
+     "dtype": "float64",
+     "values": [
+      100.1,
+      101.1,
+      102.1
+     ]
+    },
+    "open": {
+     "bits_fnv1a64": "0x155fab065f54ea88",
+     "dtype": "float64",
+     "values": [
+      100.1,
+      101.1,
+      102.1
+     ]
+    },
+    "open_msc": {
+     "bits_fnv1a64": "0x05111202a4e6d6b7",
+     "dtype": "int64",
+     "values": [
+      0,
+      60000,
+      0
+     ]
+    },
+    "tick_end": {
+     "bits_fnv1a64": "0xda2bfb225e0d1f05",
+     "dtype": "int64",
+     "values": [
+      1,
+      2,
+      3
+     ]
+    },
+    "tick_start": {
+     "bits_fnv1a64": "0x70c9b82103059f06",
+     "dtype": "int64",
+     "values": [
+      0,
+      1,
+      2
+     ]
+    },
+    "volume": {
+     "bits_fnv1a64": "0x8b2de55a4af806c4",
+     "dtype": "int64",
+     "values": [
+      1,
+      1,
+      1
+     ]
+    }
+   },
+   "inputs": {
+    "ask": {
+     "bits_fnv1a64": "0x7a7a98a7c141871d",
+     "dtype": "float64",
+     "values": [
+      100.2,
+      101.2,
+      102.2
+     ]
+    },
+    "bar_ms": 60000,
+    "bid": {
+     "bits_fnv1a64": "0xbc2f40972de6ffa4",
+     "dtype": "float64",
+     "values": [
+      100.0,
+      101.0,
+      102.0
+     ]
+    },
+    "last": {
+     "bits_fnv1a64": "0x155fab065f54ea88",
+     "dtype": "float64",
+     "values": [
+      100.1,
+      101.1,
+      102.1
+     ]
+    },
+    "time_msc": {
+     "bits_fnv1a64": "0x4431db5d867d0414",
+     "dtype": "int64",
+     "values": [
+      0,
+      70000,
+      30000
+     ]
+    },
+    "volume": {
+     "bits_fnv1a64": "0x439bb40fbb1a9658",
+     "dtype": "float64",
+     "values": [
+      1.0,
+      1.0,
+      1.0
+     ]
+    }
+   },
+   "operation": "tick_bars",
+   "params": {}
+  }
+ ],
+ "family": "tick_bars",
+ "fixture_id": "b07_out_of_order_ticks",
+ "format": "q-core-reference-fixture/1",
+ "policy": {
+  "kind": "exact"
+ },
+ "provenance": {
+  "backend_repo": "https://github.com/GuilhermeFortuna/q_backend.git",
+  "backend_rev": "067e29cdf8db67d8b8c237599fced0b8eabb921f",
+  "environment": "backend",
+  "exporter": "tools/reference/export_reference.py",
+  "numpy": "2.4.4",
+  "pandas": "3.0.2",
+  "python": "3.13.15",
+  "sources": [
+   {
+    "blob": "5240e212f2a8493720de447e849c75695286c3f1",
+    "path": "src/q_backend/backtesting/tick/chart_data.py"
+   },
+   {
+    "blob": "562f795a7fceb04ce56d0aa054ab9c17eadee803",
+    "path": "tests/backtesting/test_goldens.py"
+   }
+  ]
+ }
+}
