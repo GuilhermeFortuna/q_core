@@ -4,7 +4,8 @@ use q_engine::{
     resolve_bar_ms, sample_at_bar_ends, simulate_ticks, tick_bars, tick_day_bounds, TickInputs,
     TickSizing,
 };
-use q_parity::compare::{compare_f64, Policy};
+use q_parity::compare::{compare_f64, MismatchKind, Policy};
+use q_parity::determinism::{check_double_run_with, BitEq};
 use q_parity::fixture::{load_family, Column, ColumnData, FixtureFile};
 use q_parity::gate::{check_accounting, parse_pending, GateFailure, GateReport};
 use std::collections::BTreeMap;
@@ -44,6 +45,91 @@ struct CaseOutputs {
     columns: BTreeMap<String, Vec<f64>>,
     scalars_f64: BTreeMap<String, f64>,
     scalars_i64: BTreeMap<String, i64>,
+}
+
+impl BitEq for CaseOutputs {
+    fn bit_eq(&self, other: &Self) -> Result<(), String> {
+        if self.columns.len() != other.columns.len() {
+            return Err(format!(
+                "column count {} vs {}",
+                self.columns.len(),
+                other.columns.len()
+            ));
+        }
+        for (name, a) in &self.columns {
+            let b = other
+                .columns
+                .get(name)
+                .ok_or_else(|| format!("missing column {name}"))?;
+            a.bit_eq(b).map_err(|e| format!("column {name}: {e}"))?;
+        }
+        if self.scalars_f64.len() != other.scalars_f64.len() {
+            return Err(format!(
+                "scalars_f64 count {} vs {}",
+                self.scalars_f64.len(),
+                other.scalars_f64.len()
+            ));
+        }
+        for (name, &a) in &self.scalars_f64 {
+            let &b = other
+                .scalars_f64
+                .get(name)
+                .ok_or_else(|| format!("missing scalar_f64 {name}"))?;
+            vec![a]
+                .bit_eq(&vec![b])
+                .map_err(|e| format!("scalar_f64 {name}: {e}"))?;
+        }
+        if self.scalars_i64.len() != other.scalars_i64.len() {
+            return Err(format!(
+                "scalars_i64 count {} vs {}",
+                self.scalars_i64.len(),
+                other.scalars_i64.len()
+            ));
+        }
+        for (name, &a) in &self.scalars_i64 {
+            let &b = other
+                .scalars_i64
+                .get(name)
+                .ok_or_else(|| format!("missing scalar_i64 {name}"))?;
+            if a != b {
+                return Err(format!("scalar_i64 {name}: {a} != {b}"));
+            }
+        }
+        Ok(())
+    }
+}
+
+fn clone_fixture(file: &FixtureFile) -> FixtureFile {
+    FixtureFile {
+        path: file.path.clone(),
+        family: file.family.clone(),
+        fixture_id: file.fixture_id.clone(),
+        policy: file.policy.clone(),
+        provenance: file.provenance.clone(),
+        cases: file.cases.clone(),
+    }
+}
+
+fn set_float64_checksum(col: &mut serde_json::Value) {
+    let values: Vec<f64> = col["values"]
+        .as_array()
+        .expect("values")
+        .iter()
+        .map(|v| v.as_f64().unwrap_or(f64::NAN))
+        .collect();
+    let checksum = q_parity::fixture::fnv1a64_float64(&values);
+    col["bits_fnv1a64"] = serde_json::Value::String(format!("0x{checksum:016x}"));
+}
+
+fn set_int64_checksum(col: &mut serde_json::Value) {
+    let values: Vec<i64> = col["values"]
+        .as_array()
+        .expect("values")
+        .iter()
+        .map(|v| v.as_i64().expect("i64"))
+        .collect();
+    let checksum = q_parity::fixture::fnv1a64_int64(&values);
+    col["bits_fnv1a64"] = serde_json::Value::String(format!("0x{checksum:016x}"));
 }
 
 fn fixtures_root() -> PathBuf {
@@ -479,4 +565,170 @@ fn tick_reference_gate() {
     };
     println!("{}", report.summary());
     report.assert_passed();
+}
+
+#[test]
+fn tick_double_run() {
+    let root = fixtures_root();
+    for family in ["tick_kernel", "tick_bars"] {
+        let files =
+            load_family(&root, family).unwrap_or_else(|e| panic!("load_family({family}): {e}"));
+        let replay: fn(&serde_json::Value) -> Result<CaseOutputs, String> = match family {
+            "tick_kernel" => replay_tick_kernel_case,
+            "tick_bars" => replay_tick_bars_case,
+            _ => unreachable!(),
+        };
+        for file in &files {
+            for case in &file.cases {
+                let case_id = case.get("case_id").and_then(|v| v.as_str()).unwrap_or("*");
+                check_double_run_with(|| replay(case).expect("replay")).unwrap_or_else(|e| {
+                    panic!("{} / {case_id} nondeterministic: {e}", file.fixture_id)
+                });
+            }
+        }
+    }
+}
+
+#[test]
+fn tick_negative_controls() {
+    let root = fixtures_root();
+    let kernel_files = load_family(&root, "tick_kernel").expect("load tick_kernel");
+    let bars_files = load_family(&root, "tick_bars").expect("load tick_bars");
+    let t01 = kernel_files
+        .iter()
+        .find(|f| f.fixture_id == "t01_sl_before_tp")
+        .expect("t01_sl_before_tp");
+    let b01 = bars_files
+        .iter()
+        .find(|f| f.fixture_id == "b01_last_price_m1")
+        .expect("b01_last_price_m1");
+
+    // 1) One ULP on entry_price (checksum refreshed so compare sees Bits).
+    {
+        let mut case = t01.cases[0].clone();
+        let price = case
+            .pointer_mut("/expected/entry_price/values/0")
+            .expect("entry_price");
+        let bits = price.as_f64().unwrap().to_bits().wrapping_add(1);
+        *price = serde_json::Number::from_f64(f64::from_bits(bits))
+            .map(serde_json::Value::Number)
+            .unwrap();
+        set_float64_checksum(&mut case["expected"]["entry_price"]);
+        let mut mutated = clone_fixture(t01);
+        mutated.cases[0] = case;
+        let out = replay_tick_kernel_case(&mutated.cases[0]).unwrap();
+        let err = compare_case(&mutated, &mutated.cases[0], &out).unwrap_err();
+        match *err {
+            GateFailure::Golden { mismatch, .. } if mismatch.kind == MismatchKind::Bits => {}
+            other => panic!("expected Bits on entry_price ULP, got {other:?}"),
+        }
+    }
+
+    // 2) One exit tick moved by +1.
+    {
+        let mut case = t01.cases[0].clone();
+        let idx = case
+            .pointer_mut("/expected/exit_idx/values/0")
+            .expect("exit_idx");
+        *idx = serde_json::json!(idx.as_i64().unwrap() + 1);
+        set_int64_checksum(&mut case["expected"]["exit_idx"]);
+        let mut mutated = clone_fixture(t01);
+        mutated.cases[0] = case;
+        let out = replay_tick_kernel_case(&mutated.cases[0]).unwrap();
+        assert!(
+            compare_case(&mutated, &mutated.cases[0], &out).is_err(),
+            "exit_idx +1 should fail compare"
+        );
+    }
+
+    // 3) One ULP on final_capital (scalar, no checksum).
+    {
+        let mut case = t01.cases[0].clone();
+        let cap = case
+            .pointer_mut("/expected/final_capital")
+            .expect("final_capital");
+        let bits = cap.as_f64().unwrap().to_bits().wrapping_add(1);
+        *cap = serde_json::Number::from_f64(f64::from_bits(bits))
+            .map(serde_json::Value::Number)
+            .unwrap();
+        let mut mutated = clone_fixture(t01);
+        mutated.cases[0] = case;
+        let out = replay_tick_kernel_case(&mutated.cases[0]).unwrap();
+        let err = compare_case(&mutated, &mutated.cases[0], &out).unwrap_err();
+        match *err {
+            GateFailure::Golden { mismatch, .. } if mismatch.kind == MismatchKind::Bits => {}
+            other => panic!("expected Bits on final_capital ULP, got {other:?}"),
+        }
+    }
+
+    // 4) One bar volume changed by +1.
+    {
+        let mut case = b01.cases[0].clone();
+        let vol = case
+            .pointer_mut("/expected/volume/values/0")
+            .expect("volume");
+        *vol = serde_json::json!(vol.as_i64().unwrap() + 1);
+        set_int64_checksum(&mut case["expected"]["volume"]);
+        let mut mutated = clone_fixture(b01);
+        mutated.cases[0] = case;
+        let out = replay_tick_bars_case(&mutated.cases[0]).unwrap();
+        assert!(
+            compare_case(&mutated, &mutated.cases[0], &out).is_err(),
+            "volume +1 should fail compare"
+        );
+    }
+
+    // 5) Checksum mismatch: value changed without updating bits_fnv1a64.
+    {
+        let mut case = t01.cases[0].clone();
+        let price = case
+            .pointer_mut("/expected/entry_price/values/0")
+            .expect("entry_price");
+        let bits = price.as_f64().unwrap().to_bits().wrapping_add(1);
+        *price = serde_json::Number::from_f64(f64::from_bits(bits))
+            .map(serde_json::Value::Number)
+            .unwrap();
+        // Leave bits_fnv1a64 stale.
+        let mut mutated = clone_fixture(t01);
+        mutated.cases[0] = case;
+        let out = replay_tick_kernel_case(&mutated.cases[0]).unwrap();
+        let err = compare_case(&mutated, &mutated.cases[0], &out).unwrap_err();
+        match *err {
+            GateFailure::Golden { .. } | GateFailure::UnexpectedError { .. } => {}
+            other => panic!("expected checksum/compare failure, got {other:?}"),
+        }
+    }
+
+    // 6) Unaccounted fixture file.
+    {
+        let tmp = tempfile_family_copy(&root, "tick_kernel");
+        std::fs::write(
+            tmp.join("tick_kernel/zz_extra.json"),
+            r#"{"format":"q-core-reference-fixture/1","family":"tick_kernel","fixture_id":"zz_extra","policy":{"kind":"exact"},"provenance":{"backend_rev":"x"},"cases":[]}"#,
+        )
+        .unwrap();
+        let files = load_family(&tmp, "tick_kernel").expect("load");
+        let pending = parse_pending("").unwrap();
+        let failures = check_accounting(&files, BOUND_TICK_KERNEL, &pending, BACKEND_REV.trim());
+        assert!(
+            failures
+                .iter()
+                .any(|f| matches!(f, GateFailure::Unaccounted { .. })),
+            "expected Unaccounted, got {failures:?}"
+        );
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+}
+
+fn tempfile_family_copy(root: &Path, family: &str) -> PathBuf {
+    let tmp =
+        std::env::temp_dir().join(format!("q029-tick-gate-{}-{}", family, std::process::id()));
+    let dest = tmp.join(family);
+    let _ = std::fs::remove_dir_all(&tmp);
+    std::fs::create_dir_all(&dest).unwrap();
+    for entry in std::fs::read_dir(root.join(family)).unwrap() {
+        let entry = entry.unwrap();
+        std::fs::copy(entry.path(), dest.join(entry.file_name())).unwrap();
+    }
+    tmp
 }
