@@ -542,19 +542,19 @@ fn replay(file: &q_parity::fixture::FixtureFile) -> Result<WindowTrace, String>;
 
 ## Ordered implementation
 
-1. Work on the branch `Q-025-columnar-bar-frames` in `q_core`, created from
+1. [x] Work on the branch `Q-025-columnar-bar-frames` in `q_core`, created from
    `development` by `./work start`. Confirm that Q-021's
    `fixtures/reference/`, `tools/reference/export_reference.py` with
    `FAMILIES`, `crates/q-parity`, and the `fixtures-backend` and
    `fixtures-backend-check` targets are present on `development`. Record
    `BACKEND_REV` and confirm it predates Q-023.
-2. Extend `make contracts` to copy
+2. [x] Extend `make contracts` to copy
    `schema/api/arrow/bars.schema.json` into `contracts/schema/api/arrow/`. In
    `contracts-check`, add `--exclude=schema` to the Rust `diff -ru` and add a
    `diff` of the vendored JSON against the checkout's copy. Run
    `make contracts`, and confirm `make contracts-check` is clean. Then edit the
    vendored JSON, confirm `contracts-check` fails, and revert. Commit.
-3. Write failing tests in `q-buffers/src/column.rs`:
+3. [x] Write failing tests in `q-buffers/src/column.rs`:
    - `Bitmap::from_bools` of `[true, false, true, true, false, false, false,
      false, true, true]` has `as_bytes() == [0b0000_1101, 0b0000_0011]`;
    - `get(9)` is `true`;
@@ -565,7 +565,7 @@ fn replay(file: &q_parity::fixture::FixtureFile) -> Result<WindowTrace, String>;
    - `bytes_eq` of `0.0` against `-0.0` is `false`.
 
    Confirm they fail, implement, and confirm they pass. Commit.
-4. Write failing tests in `frame.rs`:
+4. [x] Write failing tests in `frame.rs`:
    - `try_new` with times `[0, 3_600_000_000, 7_200_000_000]` succeeds with
      `len() == 3`;
    - times `[0, 0]` give `NonIncreasingTime { index: 1 }`;
@@ -580,7 +580,7 @@ fn replay(file: &q_parity::fixture::FixtureFile) -> Result<WindowTrace, String>;
    - `TimeLabel::parse("America/Sao_Paulo")` gives `UnknownTimeLabel`.
 
    Confirm they fail, implement, and confirm they pass. Commit.
-5. Write a failing contract test in `frame.rs`: load
+5. [x] Write a failing contract test in `frame.rs`: load
    `contracts/schema/api/arrow/bars.schema.json` with `serde_json` (test-only
    `include_str!`). Assert that `schema()` of a frame with all three volume
    columns equals the JSON `fields` on `name`, `type`, `nullable` and `tz`, in
@@ -588,7 +588,7 @@ fn replay(file: &q_parity::fixture::FixtureFile) -> Result<WindowTrace, String>;
    `time` field's `tz`. Confirm it fails, implement `schema()`, and confirm it
    passes. Change `close` to `float32` in the vendored copy, confirm the test
    fails, and revert. Commit.
-6. Write failing tests in `window.rs` for the merge, one per Q-025 fixture
+6. [x] Write failing tests in `window.rs` for the merge, one per Q-025 fixture
    scenario above, with hand-built inputs and expected times. Also add:
    - `new(0, …)` gives `ZeroBound`;
    - a batch with `spread: Some` into a window created without spread gives
@@ -598,7 +598,7 @@ fn replay(file: &q_parity::fixture::FixtureFile) -> Result<WindowTrace, String>;
 
    Confirm they fail. Implement the fast path and the stable-sort merge, then
    confirm they pass. Commit.
-7. Write failing forming-bar tests in `window.rs`:
+7. [x] Write failing forming-bar tests in `window.rs`:
    - with completed bars ending at t=10h, `set_forming` at 11h makes
      `forming().time() == [11h]` and `len()` unchanged;
    - a second `set_forming` at 11h with a different close replaces it;
@@ -610,7 +610,7 @@ fn replay(file: &q_parity::fixture::FixtureFile) -> Result<WindowTrace, String>;
    - `set_forming` with 2 rows gives `FormingNotSingleBar`.
 
    Confirm they fail, implement, and confirm they pass. Commit.
-8. Add exporter tests to `tools/reference/test_export_reference.py`:
+8. [x] Add exporter tests to `tools/reference/test_export_reference.py`:
    - `encode_time` of `pd.date_range("2023-01-02", periods=2, freq="h",
      tz="UTC")` gives an `int64` column with values
      `[1672617600000000, 1672621200000000]`;
@@ -629,7 +629,7 @@ fn replay(file: &q_parity::fixture::FixtureFile) -> Result<WindowTrace, String>;
    equals `BACKEND_REV` and `environment` is `"backend"`. Run
    `make fixtures-backend-check` and confirm it is clean. Confirm that
    `make fixtures-check` (numeric families only) is unchanged. Commit.
-9. Add `q-parity` as a dev-dependency of `q-buffers`. Write
+9. [x] Add `q-parity` as a dev-dependency of `q-buffers`. Write
    `crates/q-buffers/tests/bar_window_gate.rs` with
    `bar_window_reference_gate` and `bar_window_double_run`. Before the window
    adapter is wired, `replay` returns an error, so confirm both tests fail
@@ -649,7 +649,7 @@ fn replay(file: &q_parity::fixture::FixtureFile) -> Result<WindowTrace, String>;
    with the unit test from step 6, stop and report pandas' actual order
    instead of editing the fixture. Confirm `make parity-isolation` still
    passes. Commit.
-10. Add `numpy = "0.24"` to `q-py`, `numpy>=2` to `pyproject.toml`, and install
+10. [x] Add `numpy = "0.24"` to `q-py`, `numpy>=2` to `pyproject.toml`, and install
     numpy in the `tests/test_wheel.py` venv. Write failing
     `tests/test_bar_frame.py`, run by `make wheel-test` in the same venv:
     - a frame from `synthetic_ohlcv`-shaped arrays with
@@ -672,28 +672,28 @@ fn replay(file: &q_parity::fixture::FixtureFile) -> Result<WindowTrace, String>;
 
     Confirm they fail, implement `crates/q-py/src/frame.rs`, and confirm they
     pass. Commit.
-11. Verify that builds stay separate: `cargo build -p q-qt` succeeds with no
+11. [x] Verify that builds stay separate: `cargo build -p q-qt` succeeds with no
     Python headers in use, and `make wheel` succeeds without Qt, as in Q-007
     step 8. Run `cargo tree -p q-buffers` and confirm it shows only `serde` and
     `serde_json`. Commit if a manifest change was needed.
-12. Add `tests/bench_bar_window.py` and a `bench-bar-window` target that builds
+12. [x] Add `tests/bench_bar_window.py` and a `bench-bar-window` target that builds
     the wheel and runs the script in a venv with numpy and pandas. The script
     runs five times: 10,000 one-bar ingests into a full 605-bar window through
     `RollingBarWindow.ingest_completed`, against the same through the
     evaluator's pandas sequence (`concat`, `duplicated(keep="last")`,
     `sort_index`, `iloc[-605:]`). It prints per-run and median microseconds per
     ingest for both. The target is not part of `make check`. Commit.
-13. Human step, matching human-verifiable criterion 1: run
+13. [x] Human step, matching human-verifiable criterion 1: run
     `make bench-bar-window` and record per-run and median figures for both
     paths.
-14. Human step, matching human-verifiable criterion 2: review the `q-buffers`
+14. [x] Human step, matching human-verifiable criterion 2: review the `q-buffers`
     docs against the strategy, genome and exit-rule columns listed in
     current-system context, and list any column without a supported type.
-15. Human step, matching human-verifiable criterion 3: in the full backend
+15. [x] Human step, matching human-verifiable criterion 3: in the full backend
     environment, run `make fixtures-backend-check` and confirm there is no
     diff. Record the wall-clock time. This is the local check that stands in
     for CI.
-16. Add the README fixture-protocol lines for `bar_window` (backend family;
+16. [x] Add the README fixture-protocol lines for `bar_window` (backend family;
     `fixtures-backend-check` required locally before merging changes to the
     family, its fixtures or `BACKEND_REV`; not run in CI, and why). Run
     `make check` and commit any fixes.

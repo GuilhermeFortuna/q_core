@@ -1,10 +1,11 @@
 .PHONY: check ci hooks fmt fmt-check lint test wheel wheel-test qt qt-test contracts contracts-check \
-	fixtures fixtures-check fixtures-backend fixtures-backend-check fixtures-test parity-isolation
+	fixtures fixtures-check fixtures-backend fixtures-backend-check fixtures-test parity-isolation \
+	bench-bar-window
 
 BACKEND_REPO ?= https://github.com/GuilhermeFortuna/q_backend.git
 CONTRACTS_REPO ?= https://github.com/GuilhermeFortuna/q_contracts.git
 NUMERIC_FAMILIES := indicators
-BACKEND_FAMILIES :=
+BACKEND_FAMILIES := bar_window
 MATURIN ?= $(shell command -v maturin 2>/dev/null || echo "uvx maturin")
 QT_MINIMAL_DIR ?= $(shell find $(HOME)/.local/share/qt_minimal_download -name "QtCore" -type d 2>/dev/null | head -n 1)/../..
 
@@ -36,7 +37,9 @@ contracts:
 	git -C "$$contracts_tmp/q_contracts" checkout --quiet "$$(cat CONTRACTS_REV)"; \
 	rm -rf contracts; \
 	mkdir -p contracts; \
-	cp -R "$$contracts_tmp/q_contracts/generated/rust/." contracts/
+	cp -R "$$contracts_tmp/q_contracts/generated/rust/." contracts/; \
+	mkdir -p contracts/schema/api/arrow; \
+	cp "$$contracts_tmp/q_contracts/schema/api/arrow/bars.schema.json" contracts/schema/api/arrow/bars.schema.json
 
 contracts-check:
 	contracts_tmp="$$(mktemp -d)"; \
@@ -50,7 +53,9 @@ contracts-check:
 		uv run --project "$$contracts_tmp/q_contracts" python "$$contracts_tmp/q_contracts/tools/generate.py" \
 			--language rust --out "$$generated_tmp"; \
 	fi; \
-	diff -ru contracts "$$generated_tmp/rust"
+	diff -ru --exclude=schema contracts "$$generated_tmp/rust"; \
+	diff -u contracts/schema/api/arrow/bars.schema.json \
+		"$$contracts_tmp/q_contracts/schema/api/arrow/bars.schema.json"
 
 wheel:
 	rm -rf dist
@@ -58,6 +63,14 @@ wheel:
 
 wheel-test: wheel
 	python3 tests/test_wheel.py
+	python3 tests/test_bar_frame.py
+
+bench-bar-window: wheel
+	@venv_dir="$$(mktemp -d)"; \
+	trap 'rm -rf "$$venv_dir"' EXIT; \
+	uv venv "$$venv_dir"; \
+	uv pip install --python "$$venv_dir/bin/python" dist/*.whl numpy pandas; \
+	"$$venv_dir/bin/python" tests/bench_bar_window.py
 
 qt:
 	cargo build -p q-qt
@@ -86,7 +99,10 @@ fixtures-check:
 	@fixtures_tmp="$$(mktemp -d)"; \
 	trap 'rm -rf "$$fixtures_tmp"' EXIT; \
 	uv run --frozen --project tools/reference python tools/reference/export_reference.py --backend-repo "$(BACKEND_REPO)" $(NUMERIC_FAMILIES:%=--family %) --out "$$fixtures_tmp"; \
-	uv run --frozen --project tools/reference python tools/reference/export_reference.py compare fixtures/reference "$$fixtures_tmp"
+	for fam in inputs $(NUMERIC_FAMILIES); do \
+		uv run --frozen --project tools/reference python tools/reference/export_reference.py compare \
+			"fixtures/reference/$$fam" "$$fixtures_tmp/$$fam" || exit 1; \
+	done
 
 fixtures-backend:
 	@if [ -z "$(BACKEND_FAMILIES)" ]; then \
@@ -113,7 +129,9 @@ fixtures-backend-check:
 		uv sync --frozen --project "$$qb_tmp/q_backend"; \
 		uv run --frozen --project "$$qb_tmp/q_backend" python tools/reference/export_reference.py \
 			--backend-checkout "$$qb_tmp/q_backend" $(BACKEND_FAMILIES:%=--family %) --out "$$fixtures_tmp"; \
-		diff -ru fixtures/reference "$$fixtures_tmp"; \
+		for fam in $(BACKEND_FAMILIES); do \
+			diff -ru "fixtures/reference/$$fam" "$$fixtures_tmp/$$fam" || exit 1; \
+		done; \
 	fi
 
 parity-isolation:

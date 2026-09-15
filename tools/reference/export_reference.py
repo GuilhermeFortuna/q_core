@@ -496,9 +496,11 @@ from families.indicators import (  # noqa: E402
     function_specs,
     run_case,
 )
+from families.bar_window import BarWindowFamily  # noqa: E402
 
 FAMILIES: Final[dict[str, Family]] = {
     "indicators": IndicatorFamily(),
+    "bar_window": BarWindowFamily(),
 }
 
 
