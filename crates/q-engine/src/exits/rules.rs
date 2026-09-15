@@ -92,6 +92,29 @@ pub enum Side {
     Short,
 }
 
+/// Per-rule state for one position; `None` mirrors a key absent from the Python state dict.
+#[derive(Clone, Debug, Default)]
+pub struct RuleState {
+    pub trailing_extreme: Option<f64>,
+    pub chandelier_peak: Option<f64>,
+    pub breakeven_armed: bool,
+    pub psar: Option<PsarState>,
+    /// `Some` iff the ratchet is armed.
+    pub ratchet: Option<f64>,
+    /// 0 until the first time-stop update.
+    pub time_stop_bars: i64,
+}
+
+/// Parabolic SAR recursion state (lows for long, highs for short).
+#[derive(Clone, Copy, Debug)]
+pub struct PsarState {
+    pub sar: f64,
+    pub ep: f64,
+    pub af: f64,
+    pub prior: f64,
+    pub prior_prior: Option<f64>,
+}
+
 /// Ordered set of enabled exit rules for one strategy parameter set.
 pub struct ExitRuleSet {
     params: ExitParams,

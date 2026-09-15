@@ -6,7 +6,7 @@
 
 #![allow(
     dead_code,
-    reason = "helpers land before the rule modules that call them"
+    reason = "is_missing is used by ExitInputs; max/min used once logic is linked from book"
 )]
 
 /// Python `max(a, b)`: `b if b > a else a`.

@@ -6,7 +6,9 @@
 
 pub mod exits;
 
-pub use exits::{ExitError, ExitParams, ExitRuleId, ExitRuleSet, ParamValue, Side};
+pub use exits::{
+    ExitError, ExitParams, ExitRuleId, ExitRuleSet, ParamValue, PsarState, RuleState, Side,
+};
 
 /// The crate's build identity.
 pub const CRATE_NAME: &str = "q-engine";
