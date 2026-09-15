@@ -8,8 +8,9 @@ pub mod candle;
 pub mod exits;
 
 pub use candle::{
-    CandleConfig, CandleError, CandleInputs, Costs, DayTradeWindow, Decision, DecisionStep,
-    QueuedEntry, QueuedExit, SignalColumns, Sizing, TradeView,
+    run_candle, CandleConfig, CandleError, CandleInputs, CandleRun, Costs, DayTradeWindow,
+    Decision, DecisionStep, DecisionTrace, ExitReason, QueuedEntry, QueuedExit, SignalColumns,
+    Sizing, TradeLedger, TradeView,
 };
 pub use exits::{
     ExitBook, ExitDecision, ExitError, ExitInputs, ExitParams, ExitRuleId, ExitRuleSet,

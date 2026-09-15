@@ -10,10 +10,6 @@ pub struct Costs {
     clippy::suboptimal_flops,
     reason = "exact parity with Python: (q * cpc) + ((((bps / 10_000.0) * price) * q) * pv) must not fuse"
 )]
-#[allow(
-    dead_code,
-    reason = "used by the candle run loop added in the next implementation step"
-)]
 pub(crate) fn side_cost(costs: Option<Costs>, price: f64, quantity: f64, point_value: f64) -> f64 {
     let Some(costs) = costs else {
         return 0.0;
