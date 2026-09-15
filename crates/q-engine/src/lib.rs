@@ -6,7 +6,9 @@
 
 pub mod exits;
 
-/// The crate's build identity. The only public item until the first kernel lands.
+pub use exits::{ExitError, ExitParams, ParamValue};
+
+/// The crate's build identity.
 pub const CRATE_NAME: &str = "q-engine";
 
 #[cfg(test)]
