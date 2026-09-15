@@ -245,18 +245,18 @@ README.md                                       fixture protocol and benchmark l
 
 ## Ordered implementation
 
-1. Work on the branch `Q-029-tick-kernel-and-bar-aggregation` in `q_core`,
+- [x] 1. Work on the branch `Q-029-tick-kernel-and-bar-aggregation` in `q_core`,
    created from `development` by `./work start`. If Q-026 or Q-027 has merged,
    reuse the `q-engine` dev-dependencies and `q-py/src/engine.rs` they added
    instead of adding them again. Confirm `BACKEND_REV` is `067e29c` and that the
    backend's `backtesting/tick/` is unchanged between the pin and `development`;
    otherwise stop and report.
-2. Write failing tests in `tick/numpy_sum.rs` against sums recorded from numpy
+- [x] 2. Write failing tests in `tick/numpy_sum.rs` against sums recorded from numpy
    (record the bits, computed once with `np.sum` on a fixed-seed
    `rng.random(n)`) for the nine lengths in the decisions, and for `[-0.0]`,
    asserting the sign bit numpy actually recorded rather than an assumed one.
    Confirm they fail. Implement. Confirm they pass. Commit.
-3. Write failing tests in `tick/simulate.rs`:
+- [x] 3. Write failing tests in `tick/simulate.rs`:
    - long entry at ask 100.0, stop 0.5, a later bid of exactly 99.5 exits with
      reason 1 at 99.5 (touching the level);
    - with both stop and target reached on one tick the reason is 1;
@@ -270,7 +270,7 @@ README.md                                       fixture protocol and benchmark l
    - a length mismatch names `ask`.
 
    Confirm they fail. Implement `simulate_ticks`. Confirm they pass. Commit.
-4. Write failing tests in `tick/days.rs` and `tick/bars.rs`:
+- [x] 4. Write failing tests in `tick/days.rs` and `tick/bars.rs`:
    - day bounds for times across two UTC midnights give three runs, and a time of
      -1 ms falls on the day before 1970-01-01;
    - bars with `last` all 0.0 use the midpoint, with one `last` of 0.01 use `last`
@@ -284,44 +284,44 @@ README.md                                       fixture protocol and benchmark l
    - `sample_at_bar_ends` returns the value at `end - 1`.
 
    Confirm they fail. Implement. Confirm they pass. Commit.
-5. Add exporter unit tests for `tick_kernel.py` and `tick_bars.py`: the ledger
+- [x] 5. Add exporter unit tests for `tick_kernel.py` and `tick_bars.py`: the ledger
    encoder slices to `trade_count`; the bar encoder writes `None` samples as NaN;
    the scenario builder for `b07` really produces a repeated bucket. Confirm they
    fail. Write both families with the scenarios in the decisions and register
    them. Confirm they pass. Commit.
-6. In the full backend environment run `make fixtures-backend`. Confirm that only
+- [x] 6. In the full backend environment run `make fixtures-backend`. Confirm that only
    `tick_kernel/` and `tick_bars/` appeared, that `t01` to `t10` each show the edge
    they name in their ledger, and that `b04` contains bars of every listed length.
    Commit the 20 files.
-7. Write `tests/tick_gate.rs`: accounting for both families; per scenario rebuild
+- [x] 7. Write `tests/tick_gate.rs`: accounting for both families; per scenario rebuild
    inputs, run, and compare every column and `final_capital` under the exact
    policy. Confirm it fails on encoding first and fix encoding only; a value
    difference is a kernel defect that gets a failing unit test in step 2, 3 or 4's
    module first. Confirm it passes. Commit.
-8. Add negative controls (ULP price, exit tick +1, ULP final capital, bar volume
+- [x] 8. Add negative controls (ULP price, exit tick +1, ULP final capital, bar volume
    +1, checksum, unaccounted file) and the double-run check per scenario. Confirm
    they pass. Commit.
-9. Write failing wheel tests in `tests/test_tick_engine.py`: `tick_simulate` on
+- [x] 9. Write failing wheel tests in `tests/test_tick_engine.py`: `tick_simulate` on
    `t09` inputs equals the fixture; `tick_day_bounds` and `tick_bars` equal `t12`
    and `b01`; a float32 `bid`, a 10-long `ask` against an 11-long `bid`, and
    `{"type": "inverse_volatility", ...}` each raise `ValueError` naming `bid`,
    `ask` or `inverse_volatility`; `direction` of dtype int64 raises `TypeError`.
    Confirm they fail. Implement the projections. Confirm they pass under
    `make wheel-test`. Commit.
-10. Add `tests/bench_tick_kernel.py` and the `bench-tick-kernel` target, cloning
+- [x] 10. Add `tests/bench_tick_kernel.py` and the `bench-tick-kernel` target, cloning
     the backend at `BACKEND_REV` as the candle benchmark does: time
     `simulate` on a 5,000,000-tick stream once in a fresh process (compilation
     included, with the numba cache directory pointed at a temporary directory),
     then five warm runs, and five runs of `q_core.engine.tick_simulate`, asserting
     equal ledgers first. Commit.
-11. Update README lines. Confirm existing gates pass unchanged and
+- [x] 11. Update README lines. Confirm existing gates pass unchanged and
     `make parity-isolation` passes. Release preparation: bump the workspace and
     `pyproject.toml` versions to today's date per `RELEASING.md` step 2 (and the
     Qt harness's expected version), so the human can tag the merge that Q-030
     pins. Commit.
-12. Human step, matching human-verifiable criterion 1: `time make fixtures-backend-check`.
-13. Human step, matching human-verifiable criterion 2: `make bench-tick-kernel`.
-14. Run the full validation suite. Commit.
+- [ ] 12. Human step, matching human-verifiable criterion 1: `time make fixtures-backend-check`.
+- [ ] 13. Human step, matching human-verifiable criterion 2: `make bench-tick-kernel`.
+- [ ] 14. Run the full validation suite. Commit.
 
 ## Validation
 
