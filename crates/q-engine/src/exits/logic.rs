@@ -1,10 +1,5 @@
 //! Per-rule update and decide, matching the backend exit_rules modules bit for bit.
 
-#![allow(
-    dead_code,
-    reason = "ExitBook (step 6) is the non-test caller of these rule paths"
-)]
-
 use super::params::ExitParams;
 use super::pyops::{py_max, py_min};
 use super::rules::{ExitRuleId, PsarState, RuleState, Side};

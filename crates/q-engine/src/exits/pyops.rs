@@ -4,11 +4,6 @@
 //! strictly wins. Rust's `f64::max` / `f64::min` prefer the non-NaN operand, so
 //! they diverge whenever a high or low is NaN. Exit rules must match Python.
 
-#![allow(
-    dead_code,
-    reason = "is_missing is used by ExitInputs; max/min used once logic is linked from book"
-)]
-
 /// Python `max(a, b)`: `b if b > a else a`.
 #[inline]
 pub(crate) fn py_max(a: f64, b: f64) -> f64 {

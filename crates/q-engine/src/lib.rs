@@ -7,7 +7,8 @@
 pub mod exits;
 
 pub use exits::{
-    ExitError, ExitParams, ExitRuleId, ExitRuleSet, ParamValue, PsarState, RuleState, Side,
+    ExitBook, ExitDecision, ExitError, ExitInputs, ExitParams, ExitRuleId, ExitRuleSet,
+    OpenPosition, ParamValue, PositionKey, PsarState, RuleState, Side,
 };
 
 /// The crate's build identity.
