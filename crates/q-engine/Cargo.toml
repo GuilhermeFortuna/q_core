@@ -9,5 +9,9 @@ authors.workspace = true
 q-indicators = { path = "../q-indicators" }
 q-buffers = { path = "../q-buffers" }
 
+[dev-dependencies]
+q-parity = { path = "../q-parity" }
+serde_json = "1.0"
+
 [lints]
 workspace = true
