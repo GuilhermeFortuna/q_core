@@ -1,17 +1,12 @@
 //! NumPy-compatible float64 pairwise summation (`np.sum` / `add.reduce` order).
-//!
-//! Unused until bar volume aggregation lands in a later Q-029 task.
 
-#[allow(dead_code)]
 const PW_BLOCKSIZE: usize = 128;
 
 /// Sums `values` in NumPy float64 `add.reduce` pairwise order.
-#[allow(dead_code)]
 pub(crate) fn numpy_sum_f64(values: &[f64]) -> f64 {
     pairwise_sum(values)
 }
 
-#[allow(dead_code)]
 fn pairwise_sum(values: &[f64]) -> f64 {
     let n = values.len();
     if n < 8 {
