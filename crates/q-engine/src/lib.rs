@@ -5,6 +5,7 @@
 //! by research backtesting and live evaluation paths.
 
 pub mod exits;
+pub mod tick;
 
 pub use exits::{
     ExitBook, ExitDecision, ExitError, ExitInputs, ExitParams, ExitRuleId, ExitRuleSet,
