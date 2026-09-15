@@ -11,6 +11,9 @@ pub use exits::{
     ExitBook, ExitDecision, ExitError, ExitInputs, ExitParams, ExitRuleId, ExitRuleSet,
     OpenPosition, ParamValue, PositionKey, PsarState, RuleState, Side,
 };
+pub use tick::{
+    simulate_ticks, TickError, TickExitReason, TickInputs, TickLedger, TickRun, TickSizing,
+};
 
 /// The crate's build identity.
 pub const CRATE_NAME: &str = "q-engine";
