@@ -1349,6 +1349,8 @@ version = "2026.9.14"
 dependencies = [
  "q-buffers",
  "q-indicators",
+ "q-parity",
+ "serde_json",
 ]
 
 [[package]]
