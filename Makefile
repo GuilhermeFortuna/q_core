@@ -5,7 +5,7 @@
 BACKEND_REPO ?= https://github.com/GuilhermeFortuna/q_backend.git
 CONTRACTS_REPO ?= https://github.com/GuilhermeFortuna/q_contracts.git
 NUMERIC_FAMILIES := indicators
-BACKEND_FAMILIES := bar_window exit_rules
+BACKEND_FAMILIES := bar_window exit_rules tick_kernel tick_bars
 MATURIN ?= $(shell command -v maturin 2>/dev/null || echo "uvx maturin")
 QT_MINIMAL_DIR ?= $(shell find $(HOME)/.local/share/qt_minimal_download -name "QtCore" -type d 2>/dev/null | head -n 1)/../..
 
