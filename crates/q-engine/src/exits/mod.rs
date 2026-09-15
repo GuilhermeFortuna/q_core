@@ -2,5 +2,7 @@
 
 pub mod params;
 pub(crate) mod pyops;
+pub mod rules;
 
 pub use params::{ExitError, ExitParams, ParamValue};
+pub use rules::{ExitRuleId, ExitRuleSet, Side};
