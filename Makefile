@@ -64,6 +64,7 @@ wheel:
 wheel-test: wheel
 	python3 tests/test_wheel.py
 	python3 tests/test_bar_frame.py
+	python3 tests/test_tick_engine.py
 
 bench-bar-window: wheel
 	@venv_dir="$$(mktemp -d)"; \
