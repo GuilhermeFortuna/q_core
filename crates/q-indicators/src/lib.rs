@@ -4,7 +4,20 @@
 //! Evaluates technical indicators over numerical series with no I/O, no system clock
 //! or environment access, and strictly reproducible results across runs.
 
-/// The crate's build identity. The only public item until the first kernel lands.
+mod elementwise;
+mod error;
+mod ieee;
+mod indicators;
+mod moving_averages;
+mod transforms;
+mod window;
+
+pub use error::IndicatorError;
+pub use indicators::*;
+pub use moving_averages::*;
+pub use transforms::*;
+
+/// Build identity for this crate (kernels and `IndicatorError` are also public).
 pub const CRATE_NAME: &str = "q-indicators";
 
 #[cfg(test)]

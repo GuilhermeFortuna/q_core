@@ -399,9 +399,9 @@ Cargo.toml, pyproject.toml                    version -> release date
 
 ## Ordered implementation
 
-1. Work on the branch `Q-022-indicator-and-transform-kernels` in `q_core`,
+- [x] 1. Work on the branch `Q-022-indicator-and-transform-kernels` in `q_core`,
    created from `development` by `./work start`.
-2. Projection spike. Add `numpy = "0.24"` to `crates/q-py/Cargo.toml`, or reuse
+- [x] 2. Projection spike. Add `numpy = "0.24"` to `crates/q-py/Cargo.toml`, or reuse
    the entry if Q-025 has already landed. Add `numpy>=2` to `pyproject.toml`.
    Add a temporary `q_core.indicators.identity(values)` that returns
    `PyArray1::from_vec` of a copy. Extend `tests/test_wheel.py` to install numpy
@@ -411,7 +411,7 @@ Cargo.toml, pyproject.toml                    version -> release date
    passes. Run `make parity-isolation` and confirm `q-parity` is still absent
    from q-py's graph. If the abi3 build or import fails, switch to the buffer-protocol
    fallback here and record why. Remove `identity` in step 13. Commit.
-3. Add `IndicatorError` and `ieee.rs`. Write failing tests:
+- [x] 3. Add `IndicatorError` and `ieee.rs`. Write failing tests:
    `com_from_span(3) == 1.0`; `com_from_alpha_period(2)` has the bits of
    Python's `(1 - 0.5) / 0.5`; `com_from_alpha_period(14)` has the bits of
    `(1 - 1/14) / (1/14)` (literal taken from Python);
@@ -419,7 +419,7 @@ Cargo.toml, pyproject.toml                    version -> release date
    `InvalidParameter` reads `rsi: period must be >= 1 (got 0)`. Add the
    `mul_add` disallowed methods to `clippy.toml`. Confirm the tests fail,
    implement, and confirm they pass. Commit.
-4. Write failing tests for `rolling_mean` and `rolling_var`/`rolling_std`, with
+- [x] 4. Write failing tests for `rolling_mean` and `rolling_var`/`rolling_std`, with
    values produced by pandas 3.0.2:
    - Mean, window 2 over `[0.1, 0.2, 0.3, 0.1, 0.1]`: `[nan,
      0.15000000000000002, 0.25, 0.2, 0.1]`.
@@ -438,24 +438,24 @@ Cargo.toml, pyproject.toml                    version -> release date
 
    Compare bits with `to_bits`, treating NaN positions separately. Confirm they
    fail, implement, and confirm they pass. Commit.
-5. Write failing tests for `rolling_max`, `rolling_min`, `shift`, `diff`, and
+- [x] 5. Write failing tests for `rolling_max`, `rolling_min`, `shift`, `diff`, and
    `clip_lower`: max window 2 over `[1, NaN, 3, 2]` is `[nan, nan, nan, 3]`;
    Donchian's composition over `high = [1, 3, 2, 5, 4]` and `low = [0, 1, 1, 2,
    3]` with period 2 gives upper `[nan, nan, 3, 3, 5]` and lower `[nan, nan, 0,
    1, 1]`; `clip_lower(-0.0, 0.0)` keeps -0.0. Confirm they fail, implement,
    and confirm they pass. Commit.
-6. Write failing tests for `ewm_mean`: SMMA (`com_from_alpha_period(2)`,
+- [x] 6. Write failing tests for `ewm_mean`: SMMA (`com_from_alpha_period(2)`,
    `min_periods` 0) over `[1, NaN, 3, 4]` is `[1, 1, 2.5, 3.25]`; EMA span 4 is
    `[1, 1, 2.0526315789473686, 2.8315789473684214]`; span 3 equals the SMMA
    period-2 result; leading NaNs stay NaN until the first observation; an
    `inf` is carried like NaN. Confirm they fail, implement, and confirm they
    pass. Commit.
-7. Write failing tests for `rolling_linear_wma`: window 2 over `[1, 2, inf, 3,
+- [x] 7. Write failing tests for `rolling_linear_wma`: window 2 over `[1, 2, inf, 3,
    4]` is `[nan, 1.6666666666666667, nan, nan, 3.6666666666666665]`; window 1
    is the identity; a 40-element window-20 case matches the sequential literal
    computed in Python. Confirm they fail, implement, and confirm they pass.
    Commit.
-8. Bind and implement the moving averages. Bind `sma`, `ema`, `smma`, `wma`, and
+- [x] 8. Bind and implement the moving averages. Bind `sma`, `ema`, `smma`, `wma`, and
    `hma` as `ma_sma`, `ma_ema`, `ma_smma`, `ma_wma`, and `ma_hma` in
    `BINDINGS` in `reference_gate.rs`. Their `bind_ma_*` adapters call kernels
    that return `Ok(vec![f64::NAN; n])`. In the same change, delete those five
@@ -468,7 +468,7 @@ Cargo.toml, pyproject.toml                    version -> release date
    `hma(x, 1)` equals `x`; period 0 gives `InvalidParameter` for all five.
    Implement them. Confirm the unit tests and the gate pass for these five,
    including determinism and causality. Commit.
-9. Bind and implement the transforms the same way: add `rolling_zscore`,
+- [x] 9. Bind and implement the transforms the same way: add `rolling_zscore`,
    `rolling_rank`, `pct_change`, and `clip` stubs to `BINDINGS`, delete their
    lines from `reference_pending.txt`, and confirm the gate fails. Unit tests:
    - `rolling_rank([1, inf, 2, inf], 2)` is `[nan, 1.0, 0.5, 1.0]`.
@@ -483,7 +483,7 @@ Cargo.toml, pyproject.toml                    version -> release date
    - `clip(x, 3, 2)` is `InvalidBounds`.
 
    Implement them, and confirm the tests and the gate pass. Commit.
-10. Bind and implement the indicators the same way: add stubs for
+- [x] 10. Bind and implement the indicators the same way: add stubs for
     `realized_vol`, `yang_zhang`, `rsi`, `bollinger_bands`, `macd`,
     `donchian_channels`, and `atr` to `BINDINGS`, delete their lines from
     `reference_pending.txt` (leaving it with no ids), and confirm the gate
@@ -508,7 +508,7 @@ Cargo.toml, pyproject.toml                    version -> release date
     - `yang_zhang` and `atr` with a short `low` give `LengthMismatch`.
 
     Implement them, and confirm the tests and the gate pass. Commit.
-11. Confirm that `GateReport::summary()` reads `reference gate: 16 bound, 0
+- [x] 11. Confirm that `GateReport::summary()` reads `reference gate: 16 bound, 0
     pending, 0 failures`. Add `indicator_bit_identity_report` to
     `reference_gate.rs`. It loads the set with `q_parity::fixture::load_reference_set`,
     resolves each `Case.inputs` `ColumnRef` against `ReferenceSet.inputs`, runs
@@ -521,10 +521,10 @@ Cargo.toml, pyproject.toml                    version -> release date
     pandas source. For realized volatility and Yang–Zhang, check the CPU feature
     level in the fixture provenance for the AVX-512 `log` cause. Record the
     cause for the handoff either way. Commit.
-12. Negative control for spec criterion 6: add a `mul_add` call in `window.rs`,
+- [x] 12. Negative control for spec criterion 6: add a `mul_add` call in `window.rs`,
     run `make lint`, and confirm it fails naming the disallowed method. Revert,
     and do not commit.
-13. Projection. Extend `tests/test_wheel.py` first, with these assertions:
+- [x] 13. Projection. Extend `tests/test_wheel.py` first, with these assertions:
     - Each of the 16 names exists on `q_core.indicators`, and `import
       q_core.indicators` works.
     - `pct_change(np.array([0., 1., 0., 0.]), 1)` equals `[nan, inf, -1, nan]`.
@@ -540,26 +540,26 @@ Cargo.toml, pyproject.toml                    version -> release date
     Confirm the test fails. Implement `crates/q-py/src/indicators.rs`, register
     the submodule and its `sys.modules` entry, and remove the spike's `identity`.
     Run `make wheel-test` and `make parity-isolation`, and confirm both pass. Commit.
-14. Add `tools/bench/compare_pandas.py`. It generates a fixed-seed close, OHLC
+- [x] 14. Add `tools/bench/compare_pandas.py`. It generates a fixed-seed close, OHLC
     of one million bars, and 100,000 bars for rolling rank. For RSI(14),
     Bollinger(20, 2), WMA(20), HMA(20), Yang–Zhang(20), and rolling rank(20),
     it times `q_backend`'s pandas function and the `q_core.indicators` function
     over five runs each with `time.perf_counter_ns`. It prints each run and the
     median, and first asserts that the two results agree under the fixture
     tolerance. Run it once on 10,000 bars to confirm it executes. Commit.
-15. Release preparation. Add the version-bump step to `RELEASING.md`, bump
+- [x] 15. Release preparation. Add the version-bump step to `RELEASING.md`, bump
     `Cargo.toml` `[workspace.package] version` and `pyproject.toml` `version` to
     today's date, refresh `Cargo.lock`, update the `CRATE_NAME` doc comment and
     the `q-indicators` row in `README.md` to name the 16 functions, and run
     `make wheel-test`. Commit.
-16. Human step, matching human-verifiable criterion 3: watch the branch's CI run.
-17. Human step, matching human-verifiable criterion 2: run
+- [ ] 16. Human step, matching human-verifiable criterion 3: watch the branch's CI run.
+- [ ] 17. Human step, matching human-verifiable criterion 2: run
     `tools/bench/compare_pandas.py` against the built wheel in the `q_backend`
     environment, and record per-function runs and medians.
-18. Human step, matching human-verifiable criterion 1: after merging, adjust the
+- [ ] 18. Human step, matching human-verifiable criterion 1: after merging, adjust the
     version date if needed, tag `vYYYY.MM.DD`, push the tag, and resolve and
     call the wheel from the tag in a clean environment.
-19. Run the full validation suite, `make check`, and confirm it passes. Commit
+- [x] 19. Run the full validation suite, `make check`, and confirm it passes. Commit
     any fixes.
 
 ## Validation

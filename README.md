@@ -16,7 +16,7 @@ Every responsibility named in §5 of the system architecture is mapped to exactl
 
 | Crate | Responsibility | Role & Boundary |
 | --- | --- | --- |
-| `q-indicators` | Indicator mathematics | Pure technical indicators and streaming state machines over numerical series. Zero I/O, zero system clock or environment access. |
+| `q-indicators` | Indicator mathematics | Pure technical indicators and transforms over numerical series: `realized_vol`, `yang_zhang`, `rsi`, `bollinger_bands`, `macd`, `donchian_channels`, `atr`, `sma`, `ema`, `smma`, `wma`, `hma`, `rolling_zscore`, `rolling_rank`, `pct_change`, `clip`. Zero I/O, zero system clock or environment access. |
 | `q-engine` | Simulation & execution kernels | Candle and tick kernels, fill model, exit-rule state machines, position sizing. Shared identically by backtesting and live evaluation. |
 | `q-buffers` | Columnar memory buffers & contracts | Columnar ring buffers, streaming bar windows, Arrow memory layouts, and vendored contract types (`contracts/`). |
 | `q-io` | Columnar codecs & readers | Parquet and Arrow codecs and byte decoders. Reads explicitly provided files/buffers; never performs filesystem discovery. |

@@ -1,3 +1,5 @@
+mod indicators;
+
 use pyo3::prelude::*;
 
 /// Workspace version, read from the workspace manifest at compile time.
@@ -17,5 +19,6 @@ fn contracts_rev() -> &'static str {
 fn q_core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(version, m)?)?;
     m.add_function(wrap_pyfunction!(contracts_rev, m)?)?;
+    indicators::register(m)?;
     Ok(())
 }

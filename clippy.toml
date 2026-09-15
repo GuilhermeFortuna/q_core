@@ -7,4 +7,6 @@ disallowed-methods = [
     { path = "std::time::SystemTime::now", reason = "determinism hazard: clock access is non-deterministic" },
     { path = "std::env::var", reason = "purity hazard: environment access is non-deterministic" },
     { path = "std::env::var_os", reason = "purity hazard: environment access is non-deterministic" },
+    { path = "f64::mul_add", reason = "fused multiply-add changes pandas-matching float bits" },
+    { path = "f32::mul_add", reason = "fused multiply-add changes pandas-matching float bits" },
 ]
