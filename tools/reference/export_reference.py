@@ -497,10 +497,12 @@ from families.indicators import (  # noqa: E402
     run_case,
 )
 from families.bar_window import BarWindowFamily  # noqa: E402
+from families.exit_rules import ExitRulesFamily  # noqa: E402
 
 FAMILIES: Final[dict[str, Family]] = {
     "indicators": IndicatorFamily(),
     "bar_window": BarWindowFamily(),
+    "exit_rules": ExitRulesFamily(),
 }
 
 
