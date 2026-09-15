@@ -168,14 +168,14 @@ def _default_long_short(n: int) -> list[PositionSpec]:
 
 def _scenario_params() -> dict[str, dict[str, Any]]:
     return {
-        "r01_fixed_sl": {"stop_loss_pct": 0.02},
-        "r02_atr_sl": {"stop_loss_atr": 1.5, "atr_period": 14},
-        "r03_fixed_tp": {"take_profit_pct": 0.02},
-        "r04_atr_tp": {"take_profit_atr": 1.5, "atr_period": 14},
-        "r05_trailing": {"trailing_stop_pct": 0.015},
-        "r06_chandelier": {"chandelier_atr_mult": 2.0, "atr_period": 14},
+        "r01_fixed_sl": {"stop_loss_pct": 0.01},
+        "r02_atr_sl": {"stop_loss_atr": 0.25, "atr_period": 14},
+        "r03_fixed_tp": {"take_profit_pct": 0.005},
+        "r04_atr_tp": {"take_profit_atr": 0.25, "atr_period": 14},
+        "r05_trailing": {"trailing_stop_pct": 0.003},
+        "r06_chandelier": {"chandelier_atr_mult": 0.25, "atr_period": 14},
         "r07_breakeven": {
-            "breakeven_trigger_pct": 0.01,
+            "breakeven_trigger_pct": 0.002,
             "breakeven_offset_pct": 0.0,
         },
         "r08_psar": {
@@ -184,7 +184,7 @@ def _scenario_params() -> dict[str, dict[str, Any]]:
             "psar_af_max": 0.2,
         },
         "r09_profit_target_ratchet": {
-            "target_ratchet_atr": 1.5,
+            "target_ratchet_atr": 0.25,
             "atr_period": 14,
         },
         "r10_time_stop": {"max_bars_in_trade": 40},
@@ -262,42 +262,38 @@ def _make_trade(spec: PositionSpec, bar_time: datetime) -> Any:
     )
 
 
-def _augment_params_for_indicators(params: dict[str, Any]) -> dict[str, Any]:
-    """Force atr_14 and donchian_20 columns via required_columns without changing run params."""
+def _indicator_params(params: dict[str, Any]) -> dict[str, Any]:
+    """Periods used when attaching indicator columns to the OHLC frame."""
     out = dict(params)
     out.setdefault("atr_period", 14)
-    if float(out.get("stop_loss_atr", 0) or 0) <= 0:
-        out["stop_loss_atr"] = 0.001
     if int(out.get("donchian_exit_period", 0) or 0) <= 0:
         out["donchian_exit_period"] = 20
     return out
 
 
 def _augment_frame(params: dict[str, Any], bars: pd.DataFrame) -> pd.DataFrame:
-    from q_backend.backtesting.exit_strategy import ExitStrategy
-    from q_backend.backtesting.indicator_frame import augment_indicator_frame
-    from q_backend.backtesting.strategy import TradingStrategy
+    """Attach atr_<period> and donchian_* columns the way the pin's engine would."""
+    from q_backend.backtesting import technical_indicators
 
-    class _AugmentHost(TradingStrategy):
-        def __init__(self) -> None:
-            self.parameters = dict(params)
-            self.exit_strategy = ExitStrategy(params)
-
-        def compute_indicators(self, data: pd.DataFrame) -> pd.DataFrame:
-            return data
-
-        def check_entry_conditions(self, current_data: pd.Series) -> list[object]:
-            return []
-
-        def check_exit_conditions(
-            self, current_data: pd.Series, open_trades: list[object]
-        ) -> list[object]:
-            return []
-
-        def get_chart_indicators(self) -> list[object]:
-            return []
-
-    return augment_indicator_frame(_AugmentHost(), bars)
+    frame = bars.copy()
+    atr_period = int(params.get("atr_period", 14))
+    atr_col = f"atr_{atr_period}"
+    if atr_col not in frame.columns:
+        frame[atr_col] = technical_indicators.compute_atr(
+            frame["high"], frame["low"], frame["close"], atr_period
+        )
+    donchian_period = int(params.get("donchian_exit_period", 0) or 0)
+    if donchian_period <= 0:
+        donchian_period = 20
+    high_col = f"donchian_high_{donchian_period}"
+    low_col = f"donchian_low_{donchian_period}"
+    if high_col not in frame.columns or low_col not in frame.columns:
+        upper, lower = technical_indicators.compute_donchian_channels(
+            frame["high"], frame["low"], donchian_period
+        )
+        frame[high_col] = upper
+        frame[low_col] = lower
+    return frame
 
 
 def _open_for_bar(schedule: list[PositionSpec], bar: int) -> list[PositionSpec]:
@@ -469,7 +465,7 @@ class ExitRulesFamily:
                 for p in schedule
             ]
             close_only = scenario_id == "c02_close_only"
-            frame = _augment_frame(_augment_params_for_indicators(params), bars)
+            frame = _augment_frame(_indicator_params(params), bars)
             expected = _run_scenario(
                 frame, params, schedule, close_only=close_only
             )
