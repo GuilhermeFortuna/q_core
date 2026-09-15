@@ -1,7 +1,5 @@
 //! Exit-rule parameters: Python-style coercion and backend defaults.
 
-use super::pyops::is_missing;
-
 /// A numeric parameter as the caller holds it; coerced with Python's float()/int() rules.
 #[derive(Clone, Copy, Debug)]
 pub enum ParamValue {
@@ -13,13 +11,34 @@ pub enum ParamValue {
 impl ParamValue {
     /// Coerce like Python `float(...)`: Bool → 0.0/1.0, Int as f64.
     pub fn to_float(self) -> f64 {
-        todo!("to_float")
+        match self {
+            Self::Bool(b) => {
+                if b {
+                    1.0
+                } else {
+                    0.0
+                }
+            }
+            Self::Int(i) => i as f64,
+            Self::Float(f) => f,
+        }
     }
 
     /// Coerce like Python `int(...)`: Float truncates toward zero; NaN/inf rejected.
     pub fn to_int(self, name: &'static str) -> Result<i64, ExitError> {
-        let _ = name;
-        todo!("to_int")
+        match self {
+            Self::Bool(b) => Ok(i64::from(b)),
+            Self::Int(i) => Ok(i),
+            Self::Float(f) => {
+                if f.is_nan() || f.is_infinite() {
+                    return Err(ExitError::InvalidParameter {
+                        name,
+                        reason: "cannot convert NaN or infinity to int",
+                    });
+                }
+                Ok(f as i64)
+            }
+        }
     }
 }
 
@@ -45,7 +64,23 @@ pub struct ExitParams {
 
 impl Default for ExitParams {
     fn default() -> Self {
-        todo!("ExitParams::default")
+        Self {
+            stop_loss_pct: 0.0,
+            stop_loss_atr: 0.0,
+            take_profit_pct: 0.0,
+            take_profit_atr: 0.0,
+            trailing_stop_pct: 0.0,
+            atr_period: 14,
+            chandelier_atr_mult: 0.0,
+            breakeven_trigger_pct: 0.0,
+            breakeven_offset_pct: 0.0,
+            psar_af_start: 0.0,
+            psar_af_step: 0.02,
+            psar_af_max: 0.2,
+            target_ratchet_atr: 0.0,
+            max_bars_in_trade: 0,
+            donchian_exit_period: 0,
+        }
     }
 }
 
@@ -54,8 +89,32 @@ impl ExitParams {
     pub fn from_pairs<'a>(
         pairs: impl IntoIterator<Item = (&'a str, ParamValue)>,
     ) -> Result<Self, ExitError> {
-        let _ = pairs;
-        todo!("from_pairs")
+        let mut p = Self::default();
+        for (name, value) in pairs {
+            match name {
+                "stop_loss_pct" => p.stop_loss_pct = value.to_float(),
+                "stop_loss_atr" => p.stop_loss_atr = value.to_float(),
+                "take_profit_pct" => p.take_profit_pct = value.to_float(),
+                "take_profit_atr" => p.take_profit_atr = value.to_float(),
+                "trailing_stop_pct" => p.trailing_stop_pct = value.to_float(),
+                "atr_period" => p.atr_period = value.to_int("atr_period")?,
+                "chandelier_atr_mult" => p.chandelier_atr_mult = value.to_float(),
+                "breakeven_trigger_pct" => p.breakeven_trigger_pct = value.to_float(),
+                "breakeven_offset_pct" => p.breakeven_offset_pct = value.to_float(),
+                "psar_af_start" => p.psar_af_start = value.to_float(),
+                "psar_af_step" => p.psar_af_step = value.to_float(),
+                "psar_af_max" => p.psar_af_max = value.to_float(),
+                "target_ratchet_atr" => p.target_ratchet_atr = value.to_float(),
+                "max_bars_in_trade" => {
+                    p.max_bars_in_trade = value.to_int("max_bars_in_trade")?;
+                }
+                "donchian_exit_period" => {
+                    p.donchian_exit_period = value.to_int("donchian_exit_period")?;
+                }
+                _ => {}
+            }
+        }
+        Ok(p)
     }
 }
 
