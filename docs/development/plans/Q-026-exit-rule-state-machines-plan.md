@@ -307,93 +307,93 @@ README.md                                     fixture protocol lines for exit_ru
 
 ## Ordered implementation
 
-1. Work on the branch `Q-026-exit-rule-state-machines` in `q_core`, created from
-   `development` by `./work start`. Confirm `BACKEND_REV` is still `067e29c`
-   and that `git -C <backend checkout> diff 067e29c development -- src/q_backend/backtesting/exit_rules src/q_backend/backtesting/exit_strategy.py`
-   is empty. If it is not, stop and report, because the fixtures would no
-   longer describe the backend that Q-028 swaps.
-2. Write failing unit tests in `exits/pyops.rs`: `py_max(NaN, 1.0)` is NaN,
-   `py_max(1.0, NaN)` is 1.0, `py_min(NaN, 1.0)` is NaN, `py_max(-0.0, 0.0)`
-   returns `-0.0` (no `>`), `is_missing(f64::INFINITY)` is false. Confirm they
-   fail. Implement. Confirm they pass. Commit.
-3. Write failing tests in `exits/params.rs`: defaults equal `atr_period` 14,
-   `psar_af_step` 0.02, `psar_af_max` 0.2 and zero elsewhere; `Float(14.7)` for
-   `atr_period` gives 14 and `Float(-3.9)` gives -3; `Float(NaN)` for
-   `max_bars_in_trade` is `InvalidParameter` naming it; `Bool(true)` for
-   `stop_loss_pct` is 1.0; an unknown name is ignored. Confirm they fail.
-   Implement. Confirm they pass. Commit.
-4. Write failing tests in `exits/rules.rs` against expectations copied from the
-   backend registry at the pin: `REGISTRY_ORDER` ids equal the backend's
-   `[r.id for r in EXIT_RULES]`; with only `trailing_stop_pct=0.03` enabled is
-   `[Trailing]`; with all eleven enabling parameters set, enabled order is the
-   full registry order; `required_columns` for
-   `{stop_loss_atr: 2, chandelier_atr_mult: 3, atr_period: 21, donchian_exit_period: 10}`
-   is `["atr_21", "donchian_high_10", "donchian_low_10"]`. Confirm they fail.
-   Implement `ExitRuleId`, `is_enabled` and `ExitRuleSet`. Confirm they pass.
-   Commit.
-5. Write failing rule-level unit tests, one module per rule family, each a
-   hand-computed bar sequence on a long and a short position:
-   - fixed and ATR stop and target at the exact boundary (`low == level` exits);
-   - trailing initialises to `max(entry, high)` and then trails;
-   - chandelier with ATR NaN on bar 0 updates the peak but does not exit;
-   - breakeven arms on bar 2 and exits on bar 3 at `entry * (1 + offset)`;
-   - psar first bar initialises only; bar 3 clamps to the prior-prior low; AF
-     stops at `af_max`;
-   - ratchet does not arm on a NaN-ATR bar even when high passes the level;
-   - time stop with `max_bars_in_trade = 3` exits on the third evaluation;
-   - Donchian with both columns absent never exits.
+- [x] 1. Work on the branch `Q-026-exit-rule-state-machines` in `q_core`, created from
+  `development` by `./work start`. Confirm `BACKEND_REV` is still `067e29c`
+  and that `git -C <backend checkout> diff 067e29c development -- src/q_backend/backtesting/exit_rules src/q_backend/backtesting/exit_strategy.py`
+  is empty. If it is not, stop and report, because the fixtures would no
+  longer describe the backend that Q-028 swaps.
+- [x] 2. Write failing unit tests in `exits/pyops.rs`: `py_max(NaN, 1.0)` is NaN,
+  `py_max(1.0, NaN)` is 1.0, `py_min(NaN, 1.0)` is NaN, `py_max(-0.0, 0.0)`
+  returns `-0.0` (no `>`), `is_missing(f64::INFINITY)` is false. Confirm they
+  fail. Implement. Confirm they pass. Commit.
+- [x] 3. Write failing tests in `exits/params.rs`: defaults equal `atr_period` 14,
+  `psar_af_step` 0.02, `psar_af_max` 0.2 and zero elsewhere; `Float(14.7)` for
+  `atr_period` gives 14 and `Float(-3.9)` gives -3; `Float(NaN)` for
+  `max_bars_in_trade` is `InvalidParameter` naming it; `Bool(true)` for
+  `stop_loss_pct` is 1.0; an unknown name is ignored. Confirm they fail.
+  Implement. Confirm they pass. Commit.
+- [x] 4. Write failing tests in `exits/rules.rs` against expectations copied from the
+  backend registry at the pin: `REGISTRY_ORDER` ids equal the backend's
+  `[r.id for r in EXIT_RULES]`; with only `trailing_stop_pct=0.03` enabled is
+  `[Trailing]`; with all eleven enabling parameters set, enabled order is the
+  full registry order; `required_columns` for
+  `{stop_loss_atr: 2, chandelier_atr_mult: 3, atr_period: 21, donchian_exit_period: 10}`
+  is `["atr_21", "donchian_high_10", "donchian_low_10"]`. Confirm they fail.
+  Implement `ExitRuleId`, `is_enabled` and `ExitRuleSet`. Confirm they pass.
+  Commit.
+- [x] 5. Write failing rule-level unit tests, one module per rule family, each a
+  hand-computed bar sequence on a long and a short position:
+  - fixed and ATR stop and target at the exact boundary (`low == level` exits);
+  - trailing initialises to `max(entry, high)` and then trails;
+  - chandelier with ATR NaN on bar 0 updates the peak but does not exit;
+  - breakeven arms on bar 2 and exits on bar 3 at `entry * (1 + offset)`;
+  - psar first bar initialises only; bar 3 clamps to the prior-prior low; AF
+    stops at `af_max`;
+  - ratchet does not arm on a NaN-ATR bar even when high passes the level;
+  - time stop with `max_bars_in_trade = 3` exits on the third evaluation;
+  - Donchian with both columns absent never exits.
 
-   Confirm they fail. Implement `RuleState` and each rule's update and decision
-   with the `suboptimal_flops` allow on the level functions only. Confirm they
-   pass. Commit.
-6. Write failing tests for `ExitBook::evaluate`: two positions both hit by a
-   stop yield two decisions in slice order; with `fixed_sl` and `time_stop`
-   enabled and the stop firing, the time-stop bar count of that position does not
-   advance on that bar; a key absent from the next call's slice loses its state,
-   and a call with an empty slice clears all state; a reused key starts with
-   `trailing_extreme == None`; `ExitInputs::from_slices` with `high = None`
-   reads the close. Confirm they fail. Implement `ExitBook` and `ExitInputs`.
-   Confirm they pass. Commit.
-7. Add exporter tests to `tools/reference/test_export_reference.py` for the
-   `exit_rules` family: the schedule encoder rejects a first bar after the last
-   bar; the state encoder maps an absent key to NaN or `-1`; a fixture round
-   trip preserves the checksum. Confirm they fail. Write
-   `families/exit_rules.py` with the sixteen scenarios in the decisions,
-   register it in `FAMILIES`, add it to `BACKEND_FAMILIES`. Confirm the unit tests
-   pass. Commit.
-8. In the full backend environment, run `make fixtures-backend` and commit the
-   sixteen files under `fixtures/reference/exit_rules/`. Confirm with
-   `git status` that no `bar_window` or `indicators` file changed. Confirm every
-   `r*` fixture has at least one exit per side, and drop or re-parameterise any
-   that does not before committing. Commit.
-9. Add `q-parity` and `serde_json` as dev-dependencies of `q-engine`. Write
-   `tests/exit_rules_gate.rs`: load the family, check accounting against the
-   sixteen ids and `BACKEND_REV`, rebuild each scenario's `ExitParams`, schedule
-   and `ExitInputs`, run the book bar by bar, and compare exits and states under
-   the exact policy. Run it and confirm it fails until the trace encoding matches
-   the exporter. Fix only encoding, never rule code, and if a rule value differs,
-   treat it as a rule defect and add a unit test for it in step 5's module first.
-   Confirm it passes. Commit.
-10. Add negative controls to the gate test, each asserting failure: one state
-    value moved by one ULP, one exit moved one bar later, one exit code changed
-    from `Trailing` to `FixedStopLoss`, a value edited without updating its
-    checksum, and a stray `exit_rules/zz_extra.json` in a temporary copy of the
-    fixture root. Add the double-run check (`check_double_run_with` over the
-    trace) and the prefix check (`check_prefix_causal` at prefix lengths 1, 17,
-    80 and the full length). Confirm they pass. Commit.
-11. Document the crate: module docs for `exits` listing each rule, its
-    parameters and defaults, and the reproduced quirks (skipped later-rule
-    updates, time stop counting the fill bar, ratchet not arming on missing ATR,
-    Python NaN operand rules). Add the README fixture-protocol lines for
-    `exit_rules`. Confirm `make parity-isolation` passes and that
-    `cargo tree -p q-engine -e normal` lists only `q-indicators` and `q-buffers`
-    from the workspace. Commit.
-12. Human step, matching human-verifiable criterion 1: in the full backend
-    environment run `time make fixtures-backend-check` and report the diff (none
-    expected) and the time.
-13. Human step, matching human-verifiable criterion 2: review the `q-engine`
-    docs against `q_backend/src/q_backend/backtesting/exit_rules/` at the pin.
-14. Run the full validation suite. Commit.
+  Confirm they fail. Implement `RuleState` and each rule's update and decision
+  with the `suboptimal_flops` allow on the level functions only. Confirm they
+  pass. Commit.
+- [x] 6. Write failing tests for `ExitBook::evaluate`: two positions both hit by a
+  stop yield two decisions in slice order; with `fixed_sl` and `time_stop`
+  enabled and the stop firing, the time-stop bar count of that position does not
+  advance on that bar; a key absent from the next call's slice loses its state,
+  and a call with an empty slice clears all state; a reused key starts with
+  `trailing_extreme == None`; `ExitInputs::from_slices` with `high = None`
+  reads the close. Confirm they fail. Implement `ExitBook` and `ExitInputs`.
+  Confirm they pass. Commit.
+- [x] 7. Add exporter tests to `tools/reference/test_export_reference.py` for the
+  `exit_rules` family: the schedule encoder rejects a first bar after the last
+  bar; the state encoder maps an absent key to NaN or `-1`; a fixture round
+  trip preserves the checksum. Confirm they fail. Write
+  `families/exit_rules.py` with the sixteen scenarios in the decisions,
+  register it in `FAMILIES`, add it to `BACKEND_FAMILIES`. Confirm the unit tests
+  pass. Commit.
+- [x] 8. In the full backend environment, run `make fixtures-backend` and commit the
+  sixteen files under `fixtures/reference/exit_rules/`. Confirm with
+  `git status` that no `bar_window` or `indicators` file changed. Confirm every
+  `r*` fixture has at least one exit per side, and drop or re-parameterise any
+  that does not before committing. Commit.
+- [x] 9. Add `q-parity` and `serde_json` as dev-dependencies of `q-engine`. Write
+  `tests/exit_rules_gate.rs`: load the family, check accounting against the
+  sixteen ids and `BACKEND_REV`, rebuild each scenario's `ExitParams`, schedule
+  and `ExitInputs`, run the book bar by bar, and compare exits and states under
+  the exact policy. Run it and confirm it fails until the trace encoding matches
+  the exporter. Fix only encoding, never rule code, and if a rule value differs,
+  treat it as a rule defect and add a unit test for it in step 5's module first.
+  Confirm it passes. Commit.
+- [x] 10. Add negative controls to the gate test, each asserting failure: one state
+   value moved by one ULP, one exit moved one bar later, one exit code changed
+   from `Trailing` to `FixedStopLoss`, a value edited without updating its
+   checksum, and a stray `exit_rules/zz_extra.json` in a temporary copy of the
+   fixture root. Add the double-run check (`check_double_run_with` over the
+   trace) and the prefix check (`check_prefix_causal` at prefix lengths 1, 17,
+   80 and the full length). Confirm they pass. Commit.
+- [x] 11. Document the crate: module docs for `exits` listing each rule, its
+   parameters and defaults, and the reproduced quirks (skipped later-rule
+   updates, time stop counting the fill bar, ratchet not arming on missing ATR,
+   Python NaN operand rules). Add the README fixture-protocol lines for
+   `exit_rules`. Confirm `make parity-isolation` passes and that
+   `cargo tree -p q-engine -e normal` lists only `q-indicators` and `q-buffers`
+   from the workspace. Commit.
+- [ ] 12. Human step, matching human-verifiable criterion 1: in the full backend
+   environment run `time make fixtures-backend-check` and report the diff (none
+   expected) and the time.
+- [ ] 13. Human step, matching human-verifiable criterion 2: review the `q-engine`
+   docs against `q_backend/src/q_backend/backtesting/exit_rules/` at the pin.
+- [x] 14. Run the full validation suite. Commit.
 
 ## Validation
 

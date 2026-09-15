@@ -4,7 +4,14 @@
 //! Implements deterministic trade evaluation and execution state machines consumed identically
 //! by research backtesting and live evaluation paths.
 
-/// The crate's build identity. The only public item until the first kernel lands.
+pub mod exits;
+
+pub use exits::{
+    ExitBook, ExitDecision, ExitError, ExitInputs, ExitParams, ExitRuleId, ExitRuleSet,
+    OpenPosition, ParamValue, PositionKey, PsarState, RuleState, Side,
+};
+
+/// The crate's build identity.
 pub const CRATE_NAME: &str = "q-engine";
 
 #[cfg(test)]

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import io
 import json
+import math
 import struct
 import subprocess
 import sys
@@ -9,6 +10,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
+import numpy as np
 from export_reference import (
     FORMAT,
     ABS_TOL,
@@ -34,7 +36,6 @@ from export_reference import (
     run_case,
     verify_environment,
 )
-import numpy as np
 import pandas as pd
 
 
@@ -605,6 +606,49 @@ class TestBarWindowFamily(unittest.TestCase):
         expected_bounds = (20, 20, 20, 20, 20, 50, 20, 20, 1)
         for sid, bound in zip(SCENARIO_IDS, expected_bounds, strict=True):
             self.assertEqual(steps[sid][0], bound, sid)
+
+
+class TestExitRulesFamily(unittest.TestCase):
+    def test_encode_schedule_rejects_inverted_interval(self) -> None:
+        from families.exit_rules import PositionSpec, encode_schedule
+
+        with self.assertRaises(ValueError):
+            encode_schedule(
+                [PositionSpec(1, "long", 100.0, first_bar=10, last_bar=5)]
+            )
+
+    def test_encode_rule_state_absent_keys_are_nan_or_neg1(self) -> None:
+        from families.exit_rules import encode_rule_state
+
+        encoded = encode_rule_state(None)
+        self.assertTrue(math.isnan(encoded["trailing_extreme"]))
+        self.assertTrue(math.isnan(encoded["ratchet"]))
+        self.assertEqual(encoded["breakeven_armed"], -1)
+        self.assertEqual(encoded["psar_present"], -1)
+        self.assertEqual(encoded["time_stop_bars"], -1)
+
+        encoded = encode_rule_state(
+            {
+                "trailing": {"extreme": 1.5},
+                "breakeven": {"armed": True},
+                "time_stop": {"bars": 3},
+            }
+        )
+        self.assertEqual(encoded["trailing_extreme"], 1.5)
+        self.assertEqual(encoded["breakeven_armed"], 1)
+        self.assertEqual(encoded["time_stop_bars"], 3)
+
+    def test_encode_column_round_trip_preserves_checksum(self) -> None:
+        values = np.asarray([1.0, float("nan"), -0.0], dtype=np.float64)
+        col = encode_column(values)
+        reconstructed: list[float] = []
+        for v in col["values"]:  # type: ignore[index]
+            if v is None:
+                reconstructed.append(float("nan"))
+            else:
+                reconstructed.append(float(v))  # type: ignore[arg-type]
+        again = encode_column(np.asarray(reconstructed, dtype=np.float64))
+        self.assertEqual(col["bits_fnv1a64"], again["bits_fnv1a64"])
 
 
 if __name__ == "__main__":
