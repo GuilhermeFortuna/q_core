@@ -7,7 +7,10 @@
 pub mod candle;
 pub mod exits;
 
-pub use candle::{CandleConfig, CandleError, Costs, DayTradeWindow, Sizing};
+pub use candle::{
+    CandleConfig, CandleError, CandleInputs, Costs, DayTradeWindow, Decision, DecisionStep,
+    QueuedEntry, QueuedExit, SignalColumns, Sizing, TradeView,
+};
 pub use exits::{
     ExitBook, ExitDecision, ExitError, ExitInputs, ExitParams, ExitRuleId, ExitRuleSet,
     OpenPosition, ParamValue, PositionKey, PsarState, RuleState, Side,

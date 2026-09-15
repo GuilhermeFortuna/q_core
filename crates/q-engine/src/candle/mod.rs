@@ -1,4 +1,6 @@
 mod config;
+mod decision;
+mod inputs;
 mod sizing;
 
 #[expect(
@@ -7,4 +9,6 @@ mod sizing;
 )]
 pub(crate) use config::side_cost;
 pub use config::{CandleConfig, CandleError, Costs, DayTradeWindow};
+pub use decision::{Decision, DecisionStep, QueuedEntry, QueuedExit, TradeView};
+pub use inputs::{CandleInputs, SignalColumns};
 pub use sizing::Sizing;
