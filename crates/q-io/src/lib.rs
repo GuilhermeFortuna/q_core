@@ -4,8 +4,10 @@
 //! Reads and decodes explicitly provided columnar files and byte streams without performing
 //! filesystem discovery or managing dataset lifecycles.
 
+pub mod digest;
 pub mod error;
 
+pub use digest::{digest_file, DigestAlgorithm};
 pub use error::IoError;
 
 /// The crate's build identity. The only public item until the first kernel lands.
