@@ -321,7 +321,7 @@ README.md                                       fixture protocol and benchmark l
     pins. Commit.
 - [ ] 12. Human step, matching human-verifiable criterion 1: `time make fixtures-backend-check`.
 - [ ] 13. Human step, matching human-verifiable criterion 2: `make bench-tick-kernel`.
-- [ ] 14. Run the full validation suite. Commit.
+- [x] 14. Run the full validation suite. Commit.
 
 ## Validation
 
