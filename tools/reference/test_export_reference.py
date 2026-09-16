@@ -651,5 +651,86 @@ class TestExitRulesFamily(unittest.TestCase):
         self.assertEqual(col["bits_fnv1a64"], again["bits_fnv1a64"])
 
 
+class TestTickKernelFamily(unittest.TestCase):
+    def test_encode_ledger_slices_to_trade_count(self) -> None:
+        from families.tick_kernel import encode_ledger
+
+        n = 5
+        entry_idx = np.arange(n, dtype=np.int64)
+        exit_idx = np.arange(n, dtype=np.int64) + 10
+        entry_price = np.linspace(100.0, 104.0, n)
+        exit_price = np.linspace(99.0, 103.0, n)
+        direction = np.ones(n, dtype=np.int8)
+        quantity = np.full(n, 2.0, dtype=np.float64)
+        exit_reason = np.arange(1, n + 1, dtype=np.int32)
+        trade_count = 2
+        final_capital = 99_500.0
+        # Poison the unused slots so a missing slice would leak them into JSON.
+        entry_idx[trade_count:] = -1
+        exit_idx[trade_count:] = -1
+        entry_price[trade_count:] = float("nan")
+        exit_price[trade_count:] = float("nan")
+        direction[trade_count:] = -9
+        quantity[trade_count:] = float("nan")
+        exit_reason[trade_count:] = -1
+
+        encoded = encode_ledger(
+            (
+                entry_idx,
+                exit_idx,
+                entry_price,
+                exit_price,
+                direction,
+                quantity,
+                exit_reason,
+                trade_count,
+                final_capital,
+            )
+        )
+        self.assertEqual(encoded["entry_idx"]["values"], [0, 1])
+        self.assertEqual(encoded["exit_idx"]["values"], [10, 11])
+        self.assertEqual(encoded["entry_price"]["values"], [100.0, 101.0])
+        self.assertEqual(encoded["exit_price"]["values"], [99.0, 100.0])
+        self.assertEqual(encoded["direction"]["values"], [1, 1])
+        self.assertEqual(encoded["quantity"]["values"], [2.0, 2.0])
+        self.assertEqual(encoded["exit_reason"]["values"], [1, 2])
+        self.assertEqual(encoded["final_capital"], final_capital)
+
+
+class TestTickBarsFamily(unittest.TestCase):
+    def test_encode_indicator_samples_none_as_nan(self) -> None:
+        from families.tick_bars import encode_indicator_samples
+
+        col = encode_indicator_samples([1.5, None, 2.25])
+        self.assertEqual(col["dtype"], "float64")
+        self.assertEqual(col["values"][0], 1.5)
+        self.assertIsNone(col["values"][1])
+        self.assertEqual(col["values"][2], 2.25)
+        self.assertEqual(
+            col["bits_fnv1a64"],
+            f"0x{fnv1a64_float64([1.5, float('nan'), 2.25]):016x}",
+        )
+
+    def test_b07_scenario_builder_produces_repeated_bucket(self) -> None:
+        from families.tick_bars import scenario_tick_inputs
+
+        inputs = scenario_tick_inputs()["b07_out_of_order_ticks"]
+        time_msc = np.asarray(inputs["time_msc"], dtype=np.int64)
+        bar_ms = int(inputs["bar_ms"])
+        buckets = time_msc // bar_ms
+        open_msc: list[int] = []
+        prev: int | None = None
+        for b in buckets.tolist():
+            if prev is None or b != prev:
+                open_msc.append(int(b * bar_ms))
+                prev = b
+        self.assertGreater(len(open_msc), 1)
+        self.assertNotEqual(
+            len(open_msc),
+            len(set(open_msc)),
+            f"b07 must produce a repeated bucket; got open_msc={open_msc}",
+        )
+
+
 if __name__ == "__main__":
     unittest.main()
