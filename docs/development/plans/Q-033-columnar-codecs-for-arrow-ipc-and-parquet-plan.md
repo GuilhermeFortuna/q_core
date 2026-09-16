@@ -166,21 +166,21 @@ pub fn digest_file(path: &Path, algorithm: DigestAlgorithm) -> Result<String, Io
 
 ## Ordered implementation
 
-- [ ] 1. Work on the branch `Q-033-columnar-codecs-for-arrow-ipc-and-parquet` in
+- [x] 1. Work on the branch `Q-033-columnar-codecs-for-arrow-ipc-and-parquet` in
    `q_core`, created from `development` by `./work start`. Confirm
    `CONTRACTS_REV` is `998a5057` and that `bars.schema.json` is unchanged
    between the pin and `q_contracts` `development`; otherwise stop and report.
-- [ ] 2. Add `arrow` and `parquet` with default features off, plus `sha2`, to
+- [x] 2. Add `arrow` and `parquet` with default features off, plus `sha2`, to
    `q-io`. Confirm `cargo tree -p q-py` and `cargo tree -p q-qt` still exclude
    `q-parity`, and that the wheel still builds. Commit.
-- [ ] 3. Write failing tests for `IoError`'s `Display`: each variant names its
+- [x] 3. Write failing tests for `IoError`'s `Display`: each variant names its
    column, file, path or algorithm. Implement `error.rs`. Confirm they pass.
    Commit.
-- [ ] 4. Write failing tests in `digest.rs`: the sha256 vectors for the empty
+- [x] 4. Write failing tests in `digest.rs`: the sha256 vectors for the empty
    input and for a known small file; `parse("sha256")` succeeds;
    `parse("blake3")`, `parse("md5")` and `parse("SHA-256")` each give
    `UnsupportedDigest` naming the input. Implement. Confirm they pass. Commit.
-- [ ] 5. Write failing tests in `arrow_ipc.rs`, building batches with `arrow` in
+- [x] 5. Write failing tests in `arrow_ipc.rs`, building batches with `arrow` in
    the test itself: a full bar batch decodes to the expected columns; two
    batches concatenate in order; an empty stream gives an empty frame; a
    reversed column order decodes identically; a renamed column gives
@@ -188,7 +188,7 @@ pub fn digest_file(path: &Path, algorithm: DigestAlgorithm) -> Result<String, Io
    and int32 `time` each give `ColumnType` naming the column; a null `high`
    gives `NullValue`; truncated bytes give `Arrow`. Implement
    `decode_bar_batches` and `bar_field_set`. Confirm they pass. Commit.
-- [ ] 6. Write failing tests in `parquet.rs` over files written by the test with
+- [x] 6. Write failing tests in `parquet.rs` over files written by the test with
    `parquet`: two files concatenate in listed order; second, millisecond and
    nanosecond timestamp units floor to identical microseconds, including one
    pre-epoch value; float64 `tick_volume` of `2.9` and `-2.9` read as `2` and
@@ -197,18 +197,18 @@ pub fn digest_file(path: &Path, algorithm: DigestAlgorithm) -> Result<String, Io
    gives `PathPattern`; a `RowRange` spanning the file boundary returns exactly
    its rows; a range past the end gives `RowRange`. Implement `read_bar_files`
    and `bar_file_rows`. Confirm they pass. Commit.
-- [ ] 7. Write a failing test that writes a file of eight row groups, reads it
+- [x] 7. Write a failing test that writes a file of eight row groups, reads it
    with an instrumented allocator, and asserts peak bytes beyond the frame stay
    under two row groups. Implement the streaming append if the test fails on
    memory rather than on values. Confirm it passes. Commit.
-- [ ] 8. Write a determinism test: decode and read each of the two paths twice in
+- [x] 8. Write a determinism test: decode and read each of the two paths twice in
    one process and compare the frames field for field. Confirm it passes.
    Commit.
-- [ ] 9. Add `bench-parquet-read` to the `Makefile`: read a lake range named by
+- [x] 9. Add `bench-parquet-read` to the `Makefile`: read a lake range named by
    `Q_LAKE_RANGE`, five runs, reporting individual and median wall time and peak
    RSS, and compare the rows against the backend's DuckDB read at `BACKEND_REV`
    when `Q_BACKEND_CHECKOUT` is set. Commit.
-- [ ] 10. Run `make check`. Fix, re-run, commit.
+- [x] 10. Run `make check`. Fix, re-run, commit.
 - [ ] 11. **Human:** run `make bench-parquet-read` against the real lake and
    report the row comparison and the timings.
 

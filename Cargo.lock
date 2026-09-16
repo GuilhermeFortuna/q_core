@@ -1837,9 +1837,11 @@ name = "q-io"
 version = "2026.9.15"
 dependencies = [
  "arrow",
+ "libc",
  "parquet",
  "q-buffers",
  "sha2",
+ "tempfile",
 ]
 
 [[package]]
