@@ -4,9 +4,15 @@
 //! Implements deterministic trade evaluation and execution state machines consumed identically
 //! by research backtesting and live evaluation paths.
 
+pub mod candle;
 pub mod exits;
 pub mod tick;
 
+pub use candle::{
+    run_candle, CandleConfig, CandleError, CandleInputs, CandleRun, Costs, DayTradeWindow,
+    Decision, DecisionStep, DecisionTrace, ExitReason, QueuedEntry, QueuedExit, SignalColumns,
+    Sizing, TradeLedger, TradeView,
+};
 pub use exits::{
     ExitBook, ExitDecision, ExitError, ExitInputs, ExitParams, ExitRuleId, ExitRuleSet,
     OpenPosition, ParamValue, PositionKey, PsarState, RuleState, Side,

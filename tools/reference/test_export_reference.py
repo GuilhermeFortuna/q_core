@@ -651,6 +651,168 @@ class TestExitRulesFamily(unittest.TestCase):
         self.assertEqual(col["bits_fnv1a64"], again["bits_fnv1a64"])
 
 
+class _StubTrade:
+    """A `Trade`-shaped record: the ledger encoder never imports the backend's model."""
+
+    def __init__(self, **fields: object) -> None:
+        self.id = "t1"
+        self.action = "BUY"
+        self.quantity = 1.0
+        self.entry_price = 100.0
+        self.exit_price = None
+        self.commission = 0.0
+        self.pnl = None
+        self.exit_reason = None
+        self.exit_time = None
+        for name, value in fields.items():
+            setattr(self, name, value)
+
+
+class TestScriptedStrategy(unittest.TestCase):
+    def test_long_wins_over_short_when_both_are_scripted(self) -> None:
+        from families.scripted_strategy import entry_action, entry_column
+
+        buy = np.asarray([False, True, False, True])
+        sell = np.asarray([False, False, True, True])
+        entry = entry_column(buy, sell)
+        self.assertEqual(entry.dtype, np.int8)
+        self.assertEqual(list(entry), [0, 1, -1, 1])
+        self.assertEqual(entry_action(entry[3]), "BUY")
+        self.assertEqual(entry_action(entry[2]), "SELL")
+        self.assertIsNone(entry_action(entry[0]))
+
+    def test_scripted_decisions_are_in_the_signal_contract(self) -> None:
+        from families.scripted_strategy import scripted_decisions
+
+        decisions = scripted_decisions(200, seed=7)
+        self.assertEqual(len(decisions), 200)
+        self.assertTrue(set(np.unique(decisions.entry)) <= {-1, 0, 1})
+        entries = decisions.entry != 0
+        self.assertTrue(entries.any())
+        self.assertTrue(((decisions.strength > 0.0) & (decisions.strength <= 1.0))[entries].all())
+        self.assertTrue((decisions.strength[~entries] == 0.0).all())
+
+    def test_silent_exits_clears_both_columns(self) -> None:
+        from families.scripted_strategy import scripted_decisions
+
+        decisions = scripted_decisions(50, seed=7).silent_exits()
+        self.assertFalse(decisions.exit_long.any())
+        self.assertFalse(decisions.exit_short.any())
+
+
+class TestCandleEngineFamily(unittest.TestCase):
+    def test_encode_ledger_fails_on_an_ambiguous_entry_time(self) -> None:
+        from families.candle_engine import encode_ledger
+
+        index = pd.DatetimeIndex(
+            [
+                pd.Timestamp("2023-01-02T00:00", tz="UTC"),
+                pd.Timestamp("2023-01-02T01:00", tz="UTC"),
+                pd.Timestamp("2023-01-02T01:00", tz="UTC"),
+            ]
+        )
+        trade = _StubTrade(entry_time=index[1])
+        with self.assertRaises(ValueError) as cm:
+            encode_ledger([trade], index)
+        self.assertIn("unique bar position", str(cm.exception))
+
+        unique = _StubTrade(entry_time=index[0])
+        ledger = encode_ledger([unique], index)
+        self.assertEqual(ledger["entry_bar"]["values"], [0])  # type: ignore[index]
+
+    def test_encode_ledger_leaves_an_open_trade_unclosed(self) -> None:
+        from families.candle_engine import encode_ledger
+
+        index = pd.date_range("2023-01-02", periods=3, freq="h", tz="UTC")
+        trades = [
+            _StubTrade(id="open", entry_time=index[0]),
+            _StubTrade(
+                id="closed",
+                action="SELL",
+                entry_time=index[1],
+                exit_time=index[2],
+                exit_price=99.0,
+                pnl=1.0,
+                exit_reason="SIGNAL",
+            ),
+        ]
+        ledger = encode_ledger(trades, index)
+        self.assertEqual(ledger["exit_bar"]["values"], [-1, 2])  # type: ignore[index]
+        self.assertEqual(ledger["exit_reason"]["values"], [-1, 11])  # type: ignore[index]
+        self.assertEqual(ledger["side"]["values"], [1, -1])  # type: ignore[index]
+        self.assertIsNone(ledger["exit_price"]["values"][0])  # type: ignore[index]
+        self.assertIsNone(ledger["pnl"]["values"][0])  # type: ignore[index]
+
+    def test_encode_ledger_rejects_an_unknown_exit_reason(self) -> None:
+        from families.candle_engine import encode_ledger
+
+        index = pd.date_range("2023-01-02", periods=2, freq="h", tz="UTC")
+        trade = _StubTrade(
+            entry_time=index[0],
+            exit_time=index[1],
+            exit_price=99.0,
+            pnl=-1.0,
+            exit_reason="NOT_A_REASON",
+        )
+        with self.assertRaises(ValueError):
+            encode_ledger([trade], index)
+
+    def test_reason_codes_match_the_kernel(self) -> None:
+        from families.candle_engine import REASON_CODE, SCENARIO_IDS
+
+        self.assertEqual(REASON_CODE["fixed_sl"], 0)
+        self.assertEqual(REASON_CODE["donchian_stop"], 10)
+        self.assertEqual(REASON_CODE["SIGNAL"], 11)
+        self.assertEqual(REASON_CODE["END_OF_DAY"], 12)
+        self.assertEqual(REASON_CODE["FORCE_CLOSE"], 13)
+        self.assertEqual(len(SCENARIO_IDS), 17)
+        self.assertEqual(len(set(SCENARIO_IDS)), 17)
+
+    def test_index_us_rejects_sub_microsecond_times(self) -> None:
+        from families.candle_engine import index_us, timestamp_us
+
+        index = pd.date_range("2023-01-02", periods=2, freq="h", tz="UTC")
+        self.assertEqual(list(index_us(index)), [1672617600000000, 1672621200000000])
+        self.assertEqual(timestamp_us(index[1]), 1672621200000000)
+        with self.assertRaises(ValueError):
+            index_us(pd.DatetimeIndex([pd.Timestamp("2023-01-02T00:00:00.000000001", tz="UTC")]))
+
+
+class TestDecisionStepFamily(unittest.TestCase):
+    def test_reason_code_eleven_for_a_queued_exit_with_no_rule(self) -> None:
+        from families.decision_step import queued_reason_code
+
+        self.assertEqual(queued_reason_code(None), 11)
+        self.assertEqual(queued_reason_code("trailing"), 4)
+        with self.assertRaises(ValueError):
+            queued_reason_code("not_a_rule")
+
+    def test_encode_decisions_lays_exits_out_by_offset(self) -> None:
+        from families.decision_step import encode_decisions
+
+        class _Signal:
+            def __init__(self, action: str, strength: float = 1.0, exit_reason: object = None) -> None:
+                self.action = action
+                self.strength = strength
+                self.exit_reason = exit_reason
+
+        rows = [
+            ("c0", [], []),
+            ("c1", [_Signal("CLOSE")], []),
+            ("c2", [_Signal("CLOSE", exit_reason="psar")], [_Signal("SELL", strength=0.25)]),
+        ]
+        expected = encode_decisions(rows, [float("nan"), float("nan"), 3.0])
+        self.assertEqual(expected["exit_offsets"]["values"], [0, 0, 1, 2])  # type: ignore[index]
+        self.assertEqual(expected["exit_reason"]["values"], [11, 7])  # type: ignore[index]
+        self.assertEqual(expected["entry"]["values"], [0, 0, -1])  # type: ignore[index]
+        self.assertEqual(expected["entry_strength"]["values"], [0.0, 0.0, 0.25])  # type: ignore[index]
+        self.assertIsNone(expected["requested_quantity"]["values"][0])  # type: ignore[index]
+
+    def test_scenario_ids_are_seven_and_unique(self) -> None:
+        from families.decision_step import SCENARIO_IDS
+
+        self.assertEqual(len(SCENARIO_IDS), 7)
+        self.assertEqual(len(set(SCENARIO_IDS)), 7)
 class TestTickKernelFamily(unittest.TestCase):
     def test_encode_ledger_slices_to_trade_count(self) -> None:
         from families.tick_kernel import encode_ledger

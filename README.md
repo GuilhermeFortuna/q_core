@@ -72,12 +72,13 @@ q-parity      ───►  (none)
 
 `q_core` gates parity, determinism, and causality of its numerical kernels against reference fixtures generated from `q_backend`:
 - `BACKEND_REV`: Commit hash of `q_backend` pinned by this workspace for reference fixtures.
-- `fixtures/reference/`: Committed reference datasets (`inputs/`), golden outputs (`indicators/`), and backend-family fixtures (`bar_window/`, `exit_rules/`).
+- `fixtures/reference/`: Committed reference datasets (`inputs/`), golden outputs (`indicators/`), and backend-family fixtures (`bar_window/`, `exit_rules/`, `candle_engine/`, `decision_step/`, `tick_kernel/`, `tick_bars/`).
 - `make fixtures`: Exports numeric-family fixtures from `q_backend` at `BACKEND_REV` using the pinned exporter environment (`tools/reference`).
 - `make fixtures-check`: Regenerates numeric families into a temporary directory and compares those subtrees (not backend families).
-- `make fixtures-backend` / `make fixtures-backend-check`: Export / verify backend families (`BACKEND_FAMILIES`, currently `bar_window`, `exit_rules`, `tick_kernel` and `tick_bars`) that require the full `q_backend` locked environment. Required locally before merging changes to `tools/reference/families/bar_window.py`, `tools/reference/families/exit_rules.py`, `tools/reference/families/tick_kernel.py`, `tools/reference/families/tick_bars.py`, `fixtures/reference/bar_window/`, `fixtures/reference/exit_rules/`, `fixtures/reference/tick_kernel/`, `fixtures/reference/tick_bars/`, or `BACKEND_REV`. Not run in CI: the sync pulls multi-GB wheels (torch / nvidia-*), while every `cargo test` already fail-closes on a pin edit without regenerated fixtures via `ProvenanceRev`.
+- `make fixtures-backend` / `make fixtures-backend-check`: Export / verify backend families (`BACKEND_FAMILIES`, currently `bar_window`, `exit_rules`, `candle_engine`, `decision_step`, `tick_kernel`, and `tick_bars`) that require the full `q_backend` locked environment. Required locally before merging changes to those families' exporters, their fixture subtrees, or `BACKEND_REV`. Not run in CI: the sync pulls multi-GB wheels (torch / nvidia-*), while every `cargo test` already fail-closes on a pin edit without regenerated fixtures via `ProvenanceRev`.
 - `make parity-isolation`: Confirms that `q-parity` is not included in the normal or build dependency tree of `q-py` or `q-qt`.
 - `make bench-bar-window`: Human measurement of `RollingBarWindow` vs pandas window ingest cost (not part of `make check`).
+- `make bench-candle-kernel`: Human measurement of `q_core.engine.run_candle` vs `BacktestEngine._run_single_chunk` on a 50_000-bar scripted series (not part of `make check`). Set `Q_BACKEND_CHECKOUT` to reuse an existing backend tree.
 - `make bench-tick-kernel`: Human measurement of the Rust tick kernel vs the pinned numba `simulate` on a 5,000,000-tick stream (not part of `make check`).
 
 ### Pending Fixtures and Kernel Implementation
