@@ -1,0 +1,194 @@
+{
+ "cases": [
+  {
+   "case_id": "b05_interval_doubling/m1_forty_days",
+   "expected": {
+    "bar_ms": 120000
+   },
+   "inputs": {
+    "base_bar_ms": 60000,
+    "span_msc": 3456000000
+   },
+   "operation": "resolve_bar_ms",
+   "params": {
+    "base_bar_ms": 60000,
+    "display_timeframe": "M1",
+    "span_msc": 3456000000
+   }
+  },
+  {
+   "case_id": "b05_interval_doubling/h12_past_d1",
+   "expected": {
+    "bar_ms": 172800000
+   },
+   "inputs": {
+    "base_bar_ms": 43200000,
+    "span_msc": 5000000000000
+   },
+   "operation": "resolve_bar_ms",
+   "params": {
+    "base_bar_ms": 43200000,
+    "display_timeframe": "H12",
+    "span_msc": 5000000000000
+   }
+  },
+  {
+   "case_id": "b05_interval_doubling/m1_zero_span",
+   "expected": {
+    "bar_ms": 60000
+   },
+   "inputs": {
+    "base_bar_ms": 60000,
+    "span_msc": 0
+   },
+   "operation": "resolve_bar_ms",
+   "params": {
+    "base_bar_ms": 60000,
+    "display_timeframe": "M1",
+    "span_msc": 0
+   }
+  },
+  {
+   "case_id": "b05_interval_doubling/sparse_m1_bars",
+   "expected": {
+    "close": {
+     "bits_fnv1a64": "0x838ac20696c23e09",
+     "dtype": "float64",
+     "values": [
+      100.1,
+      101.1
+     ]
+    },
+    "high": {
+     "bits_fnv1a64": "0x838ac20696c23e09",
+     "dtype": "float64",
+     "values": [
+      100.1,
+      101.1
+     ]
+    },
+    "low": {
+     "bits_fnv1a64": "0x838ac20696c23e09",
+     "dtype": "float64",
+     "values": [
+      100.1,
+      101.1
+     ]
+    },
+    "open": {
+     "bits_fnv1a64": "0x838ac20696c23e09",
+     "dtype": "float64",
+     "values": [
+      100.1,
+      101.1
+     ]
+    },
+    "open_msc": {
+     "bits_fnv1a64": "0x46ac986fdce4780c",
+     "dtype": "int64",
+     "values": [
+      0,
+      3456000000
+     ]
+    },
+    "tick_end": {
+     "bits_fnv1a64": "0x7717980363c8e066",
+     "dtype": "int64",
+     "values": [
+      1,
+      2
+     ]
+    },
+    "tick_start": {
+     "bits_fnv1a64": "0x692558b056101a44",
+     "dtype": "int64",
+     "values": [
+      0,
+      1
+     ]
+    },
+    "volume": {
+     "bits_fnv1a64": "0x581cd0fa58d99645",
+     "dtype": "int64",
+     "values": [
+      1,
+      1
+     ]
+    }
+   },
+   "inputs": {
+    "ask": {
+     "bits_fnv1a64": "0x0069826e27a2c3c5",
+     "dtype": "float64",
+     "values": [
+      100.2,
+      101.2
+     ]
+    },
+    "bar_ms": 120000,
+    "bid": {
+     "bits_fnv1a64": "0x43cfc5dc01073f85",
+     "dtype": "float64",
+     "values": [
+      100.0,
+      101.0
+     ]
+    },
+    "last": {
+     "bits_fnv1a64": "0x838ac20696c23e09",
+     "dtype": "float64",
+     "values": [
+      100.1,
+      101.1
+     ]
+    },
+    "time_msc": {
+     "bits_fnv1a64": "0x46ac986fdce4780c",
+     "dtype": "int64",
+     "values": [
+      0,
+      3456000000
+     ]
+    },
+    "volume": {
+     "bits_fnv1a64": "0x2be2cbea19a827c5",
+     "dtype": "float64",
+     "values": [
+      1.0,
+      1.0
+     ]
+    }
+   },
+   "operation": "tick_bars",
+   "params": {
+    "display_timeframe": "M1",
+    "resolved_bar_ms": 120000
+   }
+  }
+ ],
+ "family": "tick_bars",
+ "fixture_id": "b05_interval_doubling",
+ "format": "q-core-reference-fixture/1",
+ "policy": {
+  "kind": "exact"
+ },
+ "provenance": {
+  "backend_repo": "https://github.com/GuilhermeFortuna/q_backend.git",
+  "backend_rev": "067e29cdf8db67d8b8c237599fced0b8eabb921f",
+  "environment": "backend",
+  "exporter": "tools/reference/export_reference.py",
+  "numpy": "2.4.4",
+  "pandas": "3.0.2",
+  "python": "3.13.15",
+  "sources": [
+   {
+    "blob": "5240e212f2a8493720de447e849c75695286c3f1",
+    "path": "src/q_backend/backtesting/tick/chart_data.py"
+   },
+   {
+    "blob": "562f795a7fceb04ce56d0aa054ab9c17eadee803",
+    "path": "tests/backtesting/test_goldens.py"
+   }
+  ]
+ }
+}

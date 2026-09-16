@@ -6,6 +6,7 @@
 
 pub mod candle;
 pub mod exits;
+pub mod tick;
 
 pub use candle::{
     run_candle, CandleConfig, CandleError, CandleInputs, CandleRun, Costs, DayTradeWindow,
@@ -15,6 +16,10 @@ pub use candle::{
 pub use exits::{
     ExitBook, ExitDecision, ExitError, ExitInputs, ExitParams, ExitRuleId, ExitRuleSet,
     OpenPosition, ParamValue, PositionKey, PsarState, RuleState, Side,
+};
+pub use tick::{
+    resolve_bar_ms, sample_at_bar_ends, simulate_ticks, tick_bars, tick_day_bounds, TickBars,
+    TickError, TickExitReason, TickInputs, TickLedger, TickRun, TickSizing,
 };
 
 /// The crate's build identity.

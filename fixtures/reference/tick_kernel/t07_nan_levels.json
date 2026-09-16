@@ -1,0 +1,148 @@
+{
+ "cases": [
+  {
+   "case_id": "t07_nan_levels",
+   "expected": {
+    "direction": {
+     "bits_fnv1a64": "0x89cd31291d2aefa4",
+     "dtype": "int64",
+     "values": [
+      1
+     ]
+    },
+    "entry_idx": {
+     "bits_fnv1a64": "0xa8c7f832281a39c5",
+     "dtype": "int64",
+     "values": [
+      0
+     ]
+    },
+    "entry_price": {
+     "bits_fnv1a64": "0xa94c4232288a6844",
+     "dtype": "float64",
+     "values": [
+      100.0
+     ]
+    },
+    "exit_idx": {
+     "bits_fnv1a64": "0xe6bd86443df8ce07",
+     "dtype": "int64",
+     "values": [
+      2
+     ]
+    },
+    "exit_price": {
+     "bits_fnv1a64": "0x7a68ddc2291c7fc0",
+     "dtype": "float64",
+     "values": [
+      99.4
+     ]
+    },
+    "exit_reason": {
+     "bits_fnv1a64": "0x2cdcdc0dfc5d1141",
+     "dtype": "int64",
+     "values": [
+      4
+     ]
+    },
+    "final_capital": 99999.4,
+    "quantity": {
+     "bits_fnv1a64": "0xaab1693229ba1db8",
+     "dtype": "float64",
+     "values": [
+      1.0
+     ]
+    }
+   },
+   "inputs": {
+    "ask": {
+     "bits_fnv1a64": "0xa2230e2b64619248",
+     "dtype": "float64",
+     "values": [
+      100.0,
+      99.4,
+      99.4
+     ]
+    },
+    "bid": {
+     "bits_fnv1a64": "0xa2230e2b64619248",
+     "dtype": "float64",
+     "values": [
+      100.0,
+      99.4,
+      99.4
+     ]
+    },
+    "direction": {
+     "bits_fnv1a64": "0x5b2a969b42d238a4",
+     "dtype": "int64",
+     "values": [
+      1,
+      0,
+      0
+     ]
+    },
+    "sl_points": {
+     "bits_fnv1a64": "0xf87c7244621f26a0",
+     "dtype": "float64",
+     "values": [
+      null,
+      0.5,
+      0.5
+     ]
+    },
+    "tp_points": {
+     "bits_fnv1a64": "0x3a92e607ae281a40",
+     "dtype": "float64",
+     "values": [
+      null,
+      3.0,
+      3.0
+     ]
+    }
+   },
+   "params": {
+    "initial_capital": 100000.0,
+    "point_value": 1.0,
+    "sizing": {
+     "quantity": 1.0,
+     "scale_by_signal_strength": false,
+     "type": "fixed_quantity"
+    }
+   }
+  }
+ ],
+ "family": "tick_kernel",
+ "fixture_id": "t07_nan_levels",
+ "format": "q-core-reference-fixture/1",
+ "policy": {
+  "kind": "exact"
+ },
+ "provenance": {
+  "backend_repo": "https://github.com/GuilhermeFortuna/q_backend.git",
+  "backend_rev": "067e29cdf8db67d8b8c237599fced0b8eabb921f",
+  "environment": "backend",
+  "exporter": "tools/reference/export_reference.py",
+  "numpy": "2.4.4",
+  "pandas": "3.0.2",
+  "python": "3.13.15",
+  "sources": [
+   {
+    "blob": "a09803fcadfc8698a38eb7117b3cf40bfa5153bc",
+    "path": "src/q_backend/backtesting/tick/kernel.py"
+   },
+   {
+    "blob": "9244797f88628399a93c334e0b1f866623badc70",
+    "path": "src/q_backend/backtesting/tick/engine.py"
+   },
+   {
+    "blob": "4c4cfc2837c9037e08542cc2f2057efb45ae40db",
+    "path": "src/q_backend/backtesting/tick/orders.py"
+   },
+   {
+    "blob": "562f795a7fceb04ce56d0aa054ab9c17eadee803",
+    "path": "tests/backtesting/test_goldens.py"
+   }
+  ]
+ }
+}

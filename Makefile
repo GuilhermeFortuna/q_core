@@ -1,11 +1,11 @@
 .PHONY: check ci hooks fmt fmt-check lint test wheel wheel-test qt qt-test contracts contracts-check \
 	fixtures fixtures-check fixtures-backend fixtures-backend-check fixtures-test parity-isolation \
-	bench-bar-window bench-candle-kernel
+	bench-bar-window bench-candle-kernel bench-tick-kernel
 
 BACKEND_REPO ?= https://github.com/GuilhermeFortuna/q_backend.git
 CONTRACTS_REPO ?= https://github.com/GuilhermeFortuna/q_contracts.git
 NUMERIC_FAMILIES := indicators
-BACKEND_FAMILIES := bar_window exit_rules candle_engine decision_step
+BACKEND_FAMILIES := bar_window exit_rules candle_engine decision_step tick_kernel tick_bars
 MATURIN ?= $(shell command -v maturin 2>/dev/null || echo "uvx maturin")
 QT_MINIMAL_DIR ?= $(shell find $(HOME)/.local/share/qt_minimal_download -name "QtCore" -type d 2>/dev/null | head -n 1)/../..
 
@@ -65,6 +65,7 @@ wheel-test: wheel
 	python3 tests/test_wheel.py
 	python3 tests/test_bar_frame.py
 	python3 tests/test_engine.py
+	python3 tests/test_tick_engine.py
 
 bench-bar-window: wheel
 	@venv_dir="$$(mktemp -d)"; \
@@ -88,6 +89,15 @@ bench-candle-kernel: wheel
 		trap 'rm -rf "$$venv_dir" "$$backend_tmp"' EXIT; \
 	fi; \
 	Q_BACKEND_CHECKOUT="$$backend_dir" "$$venv_dir/bin/python" tests/bench_candle_kernel.py
+
+bench-tick-kernel: wheel
+	@qb_tmp="$$(mktemp -d)"; \
+	trap 'rm -rf "$$qb_tmp"' EXIT; \
+	git clone --quiet "$(BACKEND_REPO)" "$$qb_tmp/q_backend"; \
+	git -C "$$qb_tmp/q_backend" checkout --quiet "$$(cat BACKEND_REV)"; \
+	uv sync --frozen --project "$$qb_tmp/q_backend"; \
+	uv pip install --python "$$qb_tmp/q_backend/.venv/bin/python" dist/*.whl; \
+	"$$qb_tmp/q_backend/.venv/bin/python" tests/bench_tick_kernel.py
 
 qt:
 	cargo build -p q-qt

@@ -17,37 +17,33 @@ The workspace Cargo/`pyproject.toml` version uses the unpadded form `YYYY.M.D` (
 
 ## Release Procedure
 
-1. **Pre-flight Validation**:
-   Ensure all local changes are committed and the working tree is clean:
-   ```bash
-   git status
-   ```
+Releases are cut by the workspace launcher, not by hand. Finishing a reviewed task in this
+repository does the whole procedure:
 
-2. **Bump package versions**:
-   Set `[workspace.package] version` in `Cargo.toml` and `version` in `pyproject.toml` to
-   today's release date in `YYYY.M.D` form (month and day without zero-padding, matching
-   existing values such as `2026.9.12`). Refresh `Cargo.lock` (for example via
-   `cargo metadata` or a workspace build) so workspace crate versions match. Confirm
-   `q_core.version()` will report the new value after the next wheel build.
+```bash
+./work finish Q-029
+```
 
-3. **Execute Validation Suite**:
-   Run the canonical validation suite:
-   ```bash
-   make check
-   ```
-   All checks (rustfmt, clippy, cargo tests, wheel build, clean venv wheel installation test, Qt C++ harness test, and contracts regeneration check) must pass with zero warnings or errors.
+It bumps `[workspace.package] version` in `Cargo.toml` and `version` in `pyproject.toml` to
+today's date in `YYYY.M.D` form, refreshes `Cargo.lock`, runs `make check`, tags
+`vYYYY.MM.DD` (suffixed `.2`, `.3`, … for a second release the same day), and pushes
+`development` and the tag. If `make check` fails, nothing is tagged or pushed and the task
+stays `In Review`; fix the cause on `development` and run the same command again.
 
-4. **Create Git Tag**:
-   Tag the commit using the release date format:
-   ```bash
-   git tag v2026.09.14
-   ```
+Because the tag is what consumers pin, a task that is `Done` here is always one `q_backend`
+or `q_terminal` can consume. See `q/docs/work-cli.md`.
 
-5. **Publish Tag**:
-   Push the tag to the remote repository:
-   ```bash
-   git push origin v2026.09.14
-   ```
+### By hand
+
+Only needed when releasing without a board task — for example a documentation-only release:
+
+1. **Pre-flight Validation**: ensure the working tree is clean (`git status`).
+2. **Bump package versions**: set `[workspace.package] version` in `Cargo.toml` and `version`
+   in `pyproject.toml` to today's date in `YYYY.M.D` form (unpadded, matching existing values
+   such as `2026.9.12`), and refresh `Cargo.lock`.
+3. **Execute Validation Suite**: `make check` must pass with zero warnings or errors.
+4. **Create Git Tag**: `git tag v2026.09.14`.
+5. **Publish Tag**: `git push origin development && git push origin v2026.09.14`.
 
 ---
 
