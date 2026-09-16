@@ -64,6 +64,7 @@ wheel:
 wheel-test: wheel
 	python3 tests/test_wheel.py
 	python3 tests/test_bar_frame.py
+	python3 tests/test_engine.py
 
 bench-bar-window: wheel
 	@venv_dir="$$(mktemp -d)"; \
@@ -71,6 +72,22 @@ bench-bar-window: wheel
 	uv venv "$$venv_dir"; \
 	uv pip install --python "$$venv_dir/bin/python" dist/*.whl numpy pandas; \
 	"$$venv_dir/bin/python" tests/bench_bar_window.py
+
+bench-candle-kernel: wheel
+	@venv_dir="$$(mktemp -d)"; \
+	backend_dir="$${Q_BACKEND_CHECKOUT:-}"; \
+	trap 'rm -rf "$$venv_dir"' EXIT; \
+	uv venv "$$venv_dir"; \
+	uv pip install --python "$$venv_dir/bin/python" dist/*.whl numpy pandas; \
+	if [ -z "$$backend_dir" ]; then \
+		backend_tmp="$$(mktemp -d)"; \
+		git clone --quiet "$(BACKEND_REPO)" "$$backend_tmp/q_backend"; \
+		git -C "$$backend_tmp/q_backend" checkout --quiet "$$(cat BACKEND_REV)"; \
+		uv sync --frozen --project "$$backend_tmp/q_backend"; \
+		backend_dir="$$backend_tmp/q_backend"; \
+		trap 'rm -rf "$$venv_dir" "$$backend_tmp"' EXIT; \
+	fi; \
+	Q_BACKEND_CHECKOUT="$$backend_dir" "$$venv_dir/bin/python" tests/bench_candle_kernel.py
 
 qt:
 	cargo build -p q-qt
