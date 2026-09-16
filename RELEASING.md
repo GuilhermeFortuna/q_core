@@ -13,6 +13,14 @@ Semantic versioning makes compatibility assertions that cannot be validated with
 
 The workspace Cargo/`pyproject.toml` version uses the unpadded form `YYYY.M.D` (for example `2026.9.14`); the git tag uses zero-padded `vYYYY.MM.DD` (for example `v2026.09.14`).
 
+**The package version does not identify a release; the tag does.** `YYYY.M.D` has
+no room for the same-day `.n` suffix — `2026.9.15` is a valid Cargo and PEP 440
+version, `2026.9.15.2` is neither — so `v2026.09.15` and `v2026.09.15.2` both
+report `q_core.version() == "2026.9.15"`. A consumer that needs to know which
+release it has must read the resolved commit its lockfile records, not the
+version string. `uv.lock` stores it on the `source` line of the `q-core`
+package; `cargo` stores it in `Cargo.lock`.
+
 ---
 
 ## Release Procedure
@@ -72,6 +80,13 @@ uv sync
 Verify the installed module:
 ```bash
 uv run python -c "import q_core; print(q_core.version(), q_core.contracts_rev())"
+```
+
+`version()` is the `YYYY.M.D` package version, which two same-day releases
+share. To confirm *which* release is installed, read the commit `uv` resolved
+the tag to:
+```bash
+grep -A2 '^name = "q-core"' uv.lock | grep source
 ```
 
 ### 2. Qt Host (`q_terminal`)
