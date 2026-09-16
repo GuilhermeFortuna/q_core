@@ -80,7 +80,7 @@ const REQUIRED_COLUMNS: [&str; 8] = [
     "real_volume",
 ];
 
-fn format_arrow_type(dt: &DataType) -> String {
+pub(crate) fn format_arrow_type(dt: &DataType) -> String {
     match dt {
         DataType::Timestamp(TimeUnit::Microsecond, _) => "timestamp[us]".to_string(),
         DataType::Timestamp(TimeUnit::Millisecond, _) => "timestamp[ms]".to_string(),
