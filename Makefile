@@ -1,6 +1,6 @@
 .PHONY: check ci hooks fmt fmt-check lint test wheel wheel-test qt qt-test contracts contracts-check \
 	fixtures fixtures-check fixtures-backend fixtures-backend-check fixtures-test parity-isolation \
-	bench-bar-window bench-candle-kernel bench-tick-kernel
+	bench-bar-window bench-candle-kernel bench-tick-kernel bench-parquet-read
 
 BACKEND_REPO ?= https://github.com/GuilhermeFortuna/q_backend.git
 CONTRACTS_REPO ?= https://github.com/GuilhermeFortuna/q_contracts.git
@@ -98,6 +98,18 @@ bench-tick-kernel: wheel
 	uv sync --frozen --project "$$qb_tmp/q_backend"; \
 	uv pip install --python "$$qb_tmp/q_backend/.venv/bin/python" dist/*.whl; \
 	"$$qb_tmp/q_backend/.venv/bin/python" tests/bench_tick_kernel.py
+
+bench-parquet-read:
+	@cargo build --release -p q-io --bin bench-parquet-read
+	@backend_dir="$${Q_BACKEND_CHECKOUT:-}"; \
+	if [ -n "$$backend_dir" ] && [ -d "$$backend_dir" ] && [ -x "$$backend_dir/.venv/bin/python" ]; then \
+		python_bin="$$backend_dir/.venv/bin/python"; \
+	elif [ -d "$$(pwd)/../q_backend/.venv" ] && [ -x "$$(pwd)/../q_backend/.venv/bin/python" ]; then \
+		python_bin="$$(pwd)/../q_backend/.venv/bin/python"; \
+	else \
+		python_bin="python3"; \
+	fi; \
+	"$$python_bin" tests/bench_parquet_read.py
 
 qt:
 	cargo build -p q-qt
