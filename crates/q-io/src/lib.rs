@@ -4,9 +4,11 @@
 //! Reads and decodes explicitly provided columnar files and byte streams without performing
 //! filesystem discovery or managing dataset lifecycles.
 
+pub mod arrow_ipc;
 pub mod digest;
 pub mod error;
 
+pub use arrow_ipc::{bar_field_set, decode_bar_batches};
 pub use digest::{digest_file, DigestAlgorithm};
 pub use error::IoError;
 
