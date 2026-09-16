@@ -8,8 +8,9 @@ use q_engine::{
     ParamValue, SignalColumns, Sizing, TradeLedger,
 };
 use q_parity::compare::{compare_f64, Mismatch, MismatchKind};
+use q_parity::determinism::{check_double_run_with, BitEq};
 use q_parity::fixture::FixtureFile;
-use q_parity::fixture::{load_family, Column, ColumnData};
+use q_parity::fixture::{fnv1a64_float64, fnv1a64_int64, load_family, Column, ColumnData};
 use q_parity::gate::{check_accounting, parse_pending, GateFailure, GateReport};
 use serde_json::{Map, Value};
 use std::collections::BTreeMap;
@@ -329,6 +330,10 @@ impl Case {
         })
     }
 
+    fn len(&self) -> usize {
+        self.time_us.len()
+    }
+
     fn run(&self) -> Result<CandleRun, String> {
         let lookup = |name: &str| self.named.get(name).map(Vec::as_slice);
         let inputs = CandleInputs {
@@ -349,6 +354,33 @@ impl Case {
             columns: &lookup,
         };
         run_candle(&inputs, &self.config).map_err(|e| format!("{e:?}"))
+    }
+
+    /// The same scenario over its first `len` bars.
+    fn prefix(&self, len: usize) -> Self {
+        let len = len.min(self.len());
+        let cut_floats =
+            |column: &Option<Vec<f64>>| column.as_ref().map(|values| values[..len].to_vec());
+        Self {
+            time_us: self.time_us[..len].to_vec(),
+            open: cut_floats(&self.open),
+            high: cut_floats(&self.high),
+            low: cut_floats(&self.low),
+            close: cut_floats(&self.close),
+            entry: self.entry[..len].to_vec(),
+            exit_long: self.exit_long[..len].to_vec(),
+            exit_short: self.exit_short[..len].to_vec(),
+            strength: self.strength[..len].to_vec(),
+            bar_index: self.bar_index.as_ref().map(|values| values[..len].to_vec()),
+            volatility: cut_floats(&self.volatility),
+            tradable: self.tradable.as_ref().map(|values| values[..len].to_vec()),
+            named: self
+                .named
+                .iter()
+                .map(|(name, values)| (name.clone(), values[..len].to_vec()))
+                .collect(),
+            config: self.config.clone(),
+        }
     }
 }
 
@@ -539,6 +571,83 @@ fn describe_f64(expected: &[f64], actual: &[f64], index: usize) -> (String, Stri
     (show(expected), show(actual))
 }
 
+// ---------------------------------------------------------------------------
+// Determinism
+// ---------------------------------------------------------------------------
+
+/// A whole run as comparable columns, so double-run equality covers the trace too.
+struct Snapshot {
+    ints: BTreeMap<&'static str, Vec<i64>>,
+    floats: BTreeMap<&'static str, Vec<f64>>,
+}
+
+impl Snapshot {
+    fn of(run: &CandleRun) -> Self {
+        let mut ints = BTreeMap::new();
+        for &name in LEDGER_INTS {
+            ints.insert(name, actual_ints(&run.trades, name));
+        }
+        ints.insert("trace_exit_offsets", run.trace.exit_offsets.clone());
+        ints.insert("trace_exit_reason", run.trace.exit_reason.clone());
+        ints.insert(
+            "trace_entry",
+            run.trace
+                .entry
+                .iter()
+                .map(|&side| i64::from(side))
+                .collect(),
+        );
+
+        let mut floats = BTreeMap::new();
+        for &name in LEDGER_FLOATS {
+            floats.insert(name, actual_floats(&run.trades, name));
+        }
+        floats.insert("trace_entry_strength", run.trace.entry_strength.clone());
+
+        Self { ints, floats }
+    }
+}
+
+impl BitEq for Snapshot {
+    fn bit_eq(&self, other: &Self) -> Result<(), String> {
+        for (name, values) in &self.ints {
+            let theirs = other
+                .ints
+                .get(name)
+                .ok_or_else(|| format!("missing column {name}"))?;
+            values
+                .bit_eq(theirs)
+                .map_err(|e| format!("column {name}: {e}"))?;
+        }
+        for (name, values) in &self.floats {
+            let theirs = other
+                .floats
+                .get(name)
+                .ok_or_else(|| format!("missing column {name}"))?;
+            values
+                .bit_eq(theirs)
+                .map_err(|e| format!("column {name}: {e}"))?;
+        }
+        Ok(())
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Tests
+// ---------------------------------------------------------------------------
+
+fn load_cases() -> Vec<(FixtureFile, Case)> {
+    let files = load_family(&fixtures_root(), "candle_engine").expect("load_family");
+    files
+        .into_iter()
+        .map(|file| {
+            let case = Case::from_json(file.cases.first().expect("one case per fixture"))
+                .unwrap_or_else(|e| panic!("{}: {e}", file.fixture_id));
+            (file, case)
+        })
+        .collect()
+}
+
 #[test]
 fn candle_engine_reference_gate() {
     let files = load_family(&fixtures_root(), "candle_engine").expect("load_family");
@@ -575,4 +684,237 @@ fn candle_engine_reference_gate() {
     };
     println!("{}", report.summary());
     report.assert_passed();
+}
+
+#[test]
+fn candle_engine_double_run() {
+    for (file, case) in load_cases() {
+        check_double_run_with(|| Snapshot::of(&case.run().expect("run")))
+            .unwrap_or_else(|e| panic!("{} nondeterministic: {e}", file.fixture_id));
+    }
+}
+
+/// The decision trace over the first `k` bars must equal the full run's first `k` entries.
+///
+/// A day-trade window is the one case where truncation legitimately changes a decision. The
+/// backend's `is_last_bar_of_day` is `i == len(chunk) - 1 or chunk.index[i + 1].date() !=
+/// timestamp.date()`, so a chunk's final bar counts as the last of its day and queues
+/// nothing. Shortening the series moves that bar, and the kernel reproduces it faithfully.
+/// Those scenarios are therefore compared up to, but not including, the prefix's last bar;
+/// every other scenario is compared over the whole prefix.
+#[test]
+fn candle_engine_prefix_causality() {
+    for (file, case) in load_cases() {
+        let n = case.len();
+        let full = case.run().expect("full run");
+        for length in [1, n / 3, (2 * n) / 3, n] {
+            if length == 0 {
+                continue;
+            }
+            let prefix = case.prefix(length).run().expect("prefix run");
+            let bars = if case.config.day_trade.is_some() {
+                length - 1
+            } else {
+                length
+            };
+            assert_prefix(&file.fixture_id, &full, &prefix, length, bars);
+        }
+    }
+}
+
+fn assert_prefix(id: &str, full: &CandleRun, prefix: &CandleRun, length: usize, bars: usize) {
+    assert_eq!(
+        prefix.trace.entry.len(),
+        length,
+        "{id}: prefix of {length} bars traced {} entries",
+        prefix.trace.entry.len()
+    );
+    for bar in 0..bars {
+        assert_eq!(
+            full.trace.entry[bar], prefix.trace.entry[bar],
+            "{id}: entry differs at bar {bar} for prefix {length}"
+        );
+        assert_eq!(
+            full.trace.entry_strength[bar].to_bits(),
+            prefix.trace.entry_strength[bar].to_bits(),
+            "{id}: entry_strength differs at bar {bar} for prefix {length}"
+        );
+        assert_eq!(
+            full.trace.exit_offsets[bar + 1] - full.trace.exit_offsets[bar],
+            prefix.trace.exit_offsets[bar + 1] - prefix.trace.exit_offsets[bar],
+            "{id}: queued exit count differs at bar {bar} for prefix {length}"
+        );
+    }
+    let queued = usize::try_from(full.trace.exit_offsets[bars]).expect("non-negative offset");
+    assert_eq!(
+        full.trace.exit_reason[..queued],
+        prefix.trace.exit_reason[..queued],
+        "{id}: queued exit reasons differ over the first {bars} bars of prefix {length}"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Negative controls
+// ---------------------------------------------------------------------------
+
+fn clone_fixture(file: &FixtureFile) -> FixtureFile {
+    FixtureFile {
+        path: file.path.clone(),
+        family: file.family.clone(),
+        fixture_id: file.fixture_id.clone(),
+        policy: file.policy.clone(),
+        provenance: file.provenance.clone(),
+        cases: file.cases.clone(),
+    }
+}
+
+fn reseal_floats(case: &mut Value, column: &str) {
+    let values: Vec<f64> = case["expected"][column]["values"]
+        .as_array()
+        .expect("values array")
+        .iter()
+        .map(|value| value.as_f64().unwrap_or(f64::NAN))
+        .collect();
+    let checksum = fnv1a64_float64(&values);
+    case["expected"][column]["bits_fnv1a64"] = Value::String(format!("0x{checksum:016x}"));
+}
+
+fn reseal_ints(case: &mut Value, column: &str) {
+    let values: Vec<i64> = case["expected"][column]["values"]
+        .as_array()
+        .expect("values array")
+        .iter()
+        .map(|value| value.as_i64().expect("int value"))
+        .collect();
+    let checksum = fnv1a64_int64(&values);
+    case["expected"][column]["bits_fnv1a64"] = Value::String(format!("0x{checksum:016x}"));
+}
+
+/// Run one mutated fixture and return the comparison's verdict.
+fn verdict(file: &FixtureFile, case: Value) -> Result<(), Box<GateFailure>> {
+    let mut mutated = clone_fixture(file);
+    mutated.cases[0] = case;
+    let parsed = Case::from_json(&mutated.cases[0]).expect("inputs are untouched");
+    let run = parsed.run().expect("run");
+    compare_ledger(&mutated, &run.trades)
+}
+
+#[test]
+fn candle_engine_negative_controls() {
+    let root = fixtures_root();
+    let files = load_family(&root, "candle_engine").expect("load_family");
+    let file = files
+        .iter()
+        .find(|file| file.fixture_id == "k01_strategy_exits")
+        .expect("k01_strategy_exits");
+
+    // 1) One ULP on the first entry price.
+    {
+        let mut case = file.cases[0].clone();
+        let values = case["expected"]["entry_price"]["values"]
+            .as_array_mut()
+            .expect("entry_price");
+        let bits = values[0].as_f64().expect("finite price").to_bits() + 1;
+        values[0] = serde_json::Number::from_f64(f64::from_bits(bits))
+            .map(Value::Number)
+            .expect("finite perturbation");
+        reseal_floats(&mut case, "entry_price");
+        match *verdict(file, case).expect_err("one ULP must fail") {
+            GateFailure::Golden { mismatch, .. } if mismatch.kind == MismatchKind::Bits => {}
+            other => panic!("expected a Bits mismatch, got {other:?}"),
+        }
+    }
+
+    // 2) Move the first close one bar later.
+    {
+        let mut case = file.cases[0].clone();
+        let values = case["expected"]["exit_bar"]["values"]
+            .as_array_mut()
+            .expect("exit_bar");
+        let index = values
+            .iter()
+            .position(|value| value.as_i64().is_some_and(|bar| bar >= 0))
+            .expect("a closed trade");
+        let moved = values[index].as_i64().expect("int bar") + 1;
+        values[index] = serde_json::json!(moved);
+        reseal_ints(&mut case, "exit_bar");
+        match *verdict(file, case).expect_err("a shifted exit bar must fail") {
+            GateFailure::Golden { mismatch, .. } => {
+                assert_eq!(mismatch.output, "exit_bar");
+                assert_eq!(mismatch.kind, MismatchKind::Int64);
+            }
+            other => panic!("expected a Golden mismatch, got {other:?}"),
+        }
+    }
+
+    // 3) Relabel a scripted close as an end-of-day one.
+    {
+        let mut case = file.cases[0].clone();
+        let values = case["expected"]["exit_reason"]["values"]
+            .as_array_mut()
+            .expect("exit_reason");
+        let index = values
+            .iter()
+            .position(|value| value.as_i64() == Some(11))
+            .expect("a SIGNAL close");
+        values[index] = serde_json::json!(12);
+        reseal_ints(&mut case, "exit_reason");
+        match *verdict(file, case).expect_err("a relabelled reason must fail") {
+            GateFailure::Golden { mismatch, .. } => {
+                assert_eq!(mismatch.output, "exit_reason");
+            }
+            other => panic!("expected a Golden mismatch, got {other:?}"),
+        }
+    }
+
+    // 4) Edit a value and leave its checksum behind.
+    {
+        let mut case = file.cases[0].clone();
+        *case
+            .pointer_mut("/expected/pnl/values/0")
+            .expect("first pnl") = serde_json::json!(42.0);
+        match *verdict(file, case).expect_err("a stale checksum must fail") {
+            GateFailure::UnexpectedError { message, .. } => {
+                assert!(
+                    message.contains("checksum mismatch"),
+                    "expected a checksum failure, got {message}"
+                );
+            }
+            other => panic!("expected an UnexpectedError, got {other:?}"),
+        }
+    }
+
+    // 5) A fixture file no binding accounts for.
+    {
+        let staged = stage_family(&root);
+        std::fs::write(
+            staged.join("candle_engine/zz_extra.json"),
+            r#"{"format":"q-core-reference-fixture/1","family":"candle_engine","fixture_id":"zz_extra","policy":{"kind":"exact"},"provenance":{"backend_rev":"x"},"cases":[]}"#,
+        )
+        .expect("write the extra fixture");
+        let staged_files = load_family(&staged, "candle_engine").expect("load_family");
+        let pending = parse_pending("").expect("parse_pending");
+        let failures =
+            check_accounting(&staged_files, BOUND_SCENARIOS, &pending, BACKEND_REV.trim());
+        assert!(
+            failures
+                .iter()
+                .any(|failure| matches!(failure, GateFailure::Unaccounted { .. })),
+            "expected an Unaccounted failure, got {failures:?}"
+        );
+        let _ = std::fs::remove_dir_all(&staged);
+    }
+}
+
+fn stage_family(root: &Path) -> PathBuf {
+    let staged = std::env::temp_dir().join(format!("q027-candle-engine-{}", std::process::id()));
+    let family = staged.join("candle_engine");
+    let _ = std::fs::remove_dir_all(&staged);
+    std::fs::create_dir_all(&family).expect("create the staging directory");
+    for entry in std::fs::read_dir(root.join("candle_engine")).expect("read the fixture directory")
+    {
+        let entry = entry.expect("directory entry");
+        std::fs::copy(entry.path(), family.join(entry.file_name())).expect("copy the fixture");
+    }
+    staged
 }
