@@ -1,3 +1,4 @@
+mod engine;
 mod indicators;
 
 use pyo3::prelude::*;
@@ -22,6 +23,7 @@ fn q_core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(version, m)?)?;
     m.add_function(wrap_pyfunction!(contracts_rev, m)?)?;
     indicators::register(m)?;
+    engine::register(m)?;
     frame::register(m)?;
     Ok(())
 }

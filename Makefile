@@ -1,6 +1,6 @@
 .PHONY: check ci hooks fmt fmt-check lint test wheel wheel-test qt qt-test contracts contracts-check \
 	fixtures fixtures-check fixtures-backend fixtures-backend-check fixtures-test parity-isolation \
-	bench-bar-window
+	bench-bar-window bench-candle-kernel
 
 BACKEND_REPO ?= https://github.com/GuilhermeFortuna/q_backend.git
 CONTRACTS_REPO ?= https://github.com/GuilhermeFortuna/q_contracts.git
