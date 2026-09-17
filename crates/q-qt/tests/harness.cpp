@@ -18,7 +18,7 @@ int main(int argc, char** argv) {
 
     assert(!version.isEmpty());
     assert(!contracts_rev.isEmpty());
-    assert(version.toStdString() == "2026.9.15");
+    assert(version.toStdString() == "2026.9.16");
 
     std::cout << "Qt harness assertions passed successfully." << std::endl;
     return 0;
