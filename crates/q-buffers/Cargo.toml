@@ -14,3 +14,7 @@ q-parity = { path = "../q-parity" }
 
 [lints]
 workspace = true
+
+[[bin]]
+name = "bench-bar-geometry"
+path = "src/bin/bench_bar_geometry.rs"

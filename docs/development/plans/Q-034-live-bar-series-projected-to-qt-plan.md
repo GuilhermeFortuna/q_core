@@ -231,7 +231,7 @@ pub fn pack(buckets: &[Bucket], view: Viewport, surface: Surface, out: &mut Vec<
    generated history, set a viewport and surface, call `rebuild_geometry`, read
    the pointer and length, assert the first and last vertices and that the
    revision advances only on mutation. Confirm `make qt-test` passes. Commit.
-- [ ] 8. Add `bench-bar-geometry` to the `Makefile`: 500,000 bars, viewports of
+- [x] 8. Add `bench-bar-geometry` to the `Makefile`: 500,000 bars, viewports of
    500, 2,000 and 8,000 buckets, five runs each, reporting individual and median
    times and the allocation count after the first call. Commit.
 - [ ] 9. Run `make check`. Confirm `make wheel-test` shows an unchanged Python

@@ -111,6 +111,9 @@ bench-parquet-read:
 	fi; \
 	"$$python_bin" tests/bench_parquet_read.py
 
+bench-bar-geometry:
+	@cargo run --release -p q-buffers --bin bench-bar-geometry
+
 qt:
 	cargo build -p q-qt
 
