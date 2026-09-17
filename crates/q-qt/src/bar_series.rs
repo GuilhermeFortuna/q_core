@@ -50,6 +50,37 @@ pub mod ffi {
         #[qinvokable]
         fn set_surface(self: Pin<&mut BarSeries>, width_px: f32, height_px: f32);
 
+        #[qinvokable]
+        fn load_history_sample(self: Pin<&mut BarSeries>, count: i64) -> bool;
+
+        #[qinvokable]
+        fn load_history_parquet(self: Pin<&mut BarSeries>, path: &QString) -> bool;
+
+        #[qinvokable]
+        fn ingest_completed_bar(
+            self: Pin<&mut BarSeries>,
+            time: i64,
+            open: f64,
+            high: f64,
+            low: f64,
+            close: f64,
+            volume: f64,
+        ) -> bool;
+
+        #[qinvokable]
+        fn ingest_forming_bar(
+            self: Pin<&mut BarSeries>,
+            time: i64,
+            open: f64,
+            high: f64,
+            low: f64,
+            close: f64,
+            volume: f64,
+        ) -> bool;
+
+        #[qinvokable]
+        fn clear_forming_bar(self: Pin<&mut BarSeries>);
+
         fn vertex_ptr(self: &BarSeries) -> *const BarVertex;
 
         fn vertex_len(self: &BarSeries) -> usize;
@@ -119,7 +150,15 @@ impl BarSeriesRust {
     }
 
     pub fn load_history(&mut self, bars: BarColumns) -> Result<(), SeriesError> {
-        self.series.load_history(bars)?;
+        let input_vols = VolumeSet::from_bars(&bars);
+        if input_vols != self.series.completed().volume_set() {
+            let mut new_series = LiveBarSeries::new(self.series.capacity(), input_vols, bars.label)
+                .map_err(SeriesError::Frame)?;
+            new_series.load_history(bars)?;
+            self.series = new_series;
+        } else {
+            self.series.load_history(bars)?;
+        }
         self.sync_properties();
         Ok(())
     }
@@ -134,6 +173,11 @@ impl BarSeriesRust {
         self.series.set_forming(bar)?;
         self.sync_properties();
         Ok(())
+    }
+
+    pub fn clear_forming(&mut self) {
+        self.series.clear_forming();
+        self.sync_properties();
     }
 
     pub fn set_viewport(&mut self, first_bar: i64, last_bar: i64, low: f64, high: f64) {
@@ -304,6 +348,170 @@ impl ffi::BarSeries {
 
     pub fn ingest_forming(mut self: Pin<&mut Self>, bar: BarColumns) -> Result<(), SeriesError> {
         self.as_mut().rust_mut().get_mut().ingest_forming(bar)
+    }
+
+    #[allow(clippy::suboptimal_flops)]
+    pub fn load_history_sample(mut self: Pin<&mut Self>, count: i64) -> bool {
+        if count <= 0 {
+            return false;
+        }
+        let n = count as usize;
+        let mut time = Vec::with_capacity(n);
+        let mut open = Vec::with_capacity(n);
+        let mut high = Vec::with_capacity(n);
+        let mut low = Vec::with_capacity(n);
+        let mut close = Vec::with_capacity(n);
+
+        for i in 0..n {
+            let t = 1_000_000_000i64 + (i as i64) * 60;
+            let o = 100.0 + (i as f64) * 0.5;
+            let h = o + 2.0;
+            let l = o - 1.5;
+            let c = if i % 2 == 0 { o + 1.0 } else { o - 0.5 };
+            time.push(t);
+            open.push(o);
+            high.push(h);
+            low.push(l);
+            close.push(c);
+        }
+        let bars = BarColumns {
+            time,
+            open,
+            high,
+            low,
+            close,
+            tick_volume: None,
+            spread: None,
+            real_volume: None,
+            label: TimeLabel::Utc,
+        };
+        self.as_mut()
+            .rust_mut()
+            .get_mut()
+            .load_history(bars)
+            .is_ok()
+    }
+
+    pub fn load_history_parquet(mut self: Pin<&mut Self>, path: &QString) -> bool {
+        let p_str = path.to_string();
+        let p = std::path::Path::new(&p_str);
+        match q_io::parquet::read_bar_files(&[p], None) {
+            Ok(frame) => self
+                .as_mut()
+                .rust_mut()
+                .get_mut()
+                .load_history(frame.bars().clone())
+                .is_ok(),
+            Err(_) => false,
+        }
+    }
+
+    pub fn ingest_completed_bar(
+        mut self: Pin<&mut Self>,
+        time: i64,
+        open: f64,
+        high: f64,
+        low: f64,
+        close: f64,
+        volume: f64,
+    ) -> bool {
+        let real_vol = if self
+            .as_ref()
+            .rust()
+            .series
+            .completed()
+            .volume_set()
+            .real_volume
+        {
+            Some(vec![volume as i64])
+        } else {
+            None
+        };
+        let tick_vol = if self
+            .as_ref()
+            .rust()
+            .series
+            .completed()
+            .volume_set()
+            .tick_volume
+        {
+            Some(vec![volume as i64])
+        } else {
+            None
+        };
+        let label = self.as_ref().rust().series.completed().label();
+        let bars = BarColumns {
+            time: vec![time],
+            open: vec![open],
+            high: vec![high],
+            low: vec![low],
+            close: vec![close],
+            tick_volume: tick_vol,
+            spread: None,
+            real_volume: real_vol,
+            label,
+        };
+        self.as_mut()
+            .rust_mut()
+            .get_mut()
+            .ingest_completed(bars)
+            .is_ok()
+    }
+
+    pub fn ingest_forming_bar(
+        mut self: Pin<&mut Self>,
+        time: i64,
+        open: f64,
+        high: f64,
+        low: f64,
+        close: f64,
+        volume: f64,
+    ) -> bool {
+        let real_vol = if self
+            .as_ref()
+            .rust()
+            .series
+            .completed()
+            .volume_set()
+            .real_volume
+        {
+            Some(vec![volume as i64])
+        } else {
+            None
+        };
+        let tick_vol = if self
+            .as_ref()
+            .rust()
+            .series
+            .completed()
+            .volume_set()
+            .tick_volume
+        {
+            Some(vec![volume as i64])
+        } else {
+            None
+        };
+        let label = self.as_ref().rust().series.completed().label();
+        let bars = BarColumns {
+            time: vec![time],
+            open: vec![open],
+            high: vec![high],
+            low: vec![low],
+            close: vec![close],
+            tick_volume: tick_vol,
+            spread: None,
+            real_volume: real_vol,
+            label,
+        };
+        self.as_mut()
+            .rust_mut()
+            .get_mut()
+            .ingest_forming(bars)
+            .is_ok()
+    }
+
+    pub fn clear_forming_bar(mut self: Pin<&mut Self>) {
+        self.as_mut().rust_mut().get_mut().clear_forming();
     }
 }
 

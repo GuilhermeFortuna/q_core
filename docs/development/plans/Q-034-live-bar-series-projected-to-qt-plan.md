@@ -227,7 +227,7 @@ pub fn pack(buckets: &[Bucket], view: Viewport, surface: Surface, out: &mut Vec<
    `ingest_forming` with no event loop and assert bar count, extents, last price,
    forming flag, geometry revision and vertex length. Implement. Confirm they
    pass. Commit.
-- [ ] 7. Extend `crates/q-qt/tests/harness.cpp`: construct a `BarSeries`, load a
+- [x] 7. Extend `crates/q-qt/tests/harness.cpp`: construct a `BarSeries`, load a
    generated history, set a viewport and surface, call `rebuild_geometry`, read
    the pointer and length, assert the first and last vertices and that the
    revision advances only on mutation. Confirm `make qt-test` passes. Commit.
