@@ -191,10 +191,10 @@ pub fn pack(buckets: &[Bucket], view: Viewport, surface: Surface, out: &mut Vec<
 
 ## Ordered implementation
 
-- [ ] 1. Work on the branch `Q-034-live-bar-series-projected-to-qt` in `q_core`,
+- [x] 1. Work on the branch `Q-034-live-bar-series-projected-to-qt` in `q_core`,
    created from `development` by `./work start`. Confirm Q-033 has merged into
    `development` and that `make check` passes on it before changing anything.
-- [ ] 2. Write failing tests in `series.rs`: append extends; an equal-time bar
+- [x] 2. Write failing tests in `series.rs`: append extends; an equal-time bar
    replaces the last; a batch starting before the last bar gives `BeforeLast`
    naming the position and leaves length and revision unchanged; an internally
    unordered batch gives `NotAscending`; capacity 3 with 5 bars keeps the last
