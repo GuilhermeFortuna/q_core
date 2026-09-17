@@ -4,7 +4,7 @@ build-backend = "maturin"
 
 [project]
 name = "q-core"
-version = "2026.9.15"
+version = "2026.9.16"
 description = "Deterministic computational core for Q"
 requires-python = ">=3.12"
 dependencies = ["numpy>=2"]
