@@ -207,7 +207,7 @@ pub fn pack(buckets: &[Bucket], view: Viewport, surface: Surface, out: &mut Vec<
    exactly the changed bars after an append, a replace and a forming change;
    after `load_history` and after a capacity drop it is `TooOld`; `dirty_since`
    at the current revision is `None`. Implement. Confirm they pass. Commit.
-- [ ] 4. Write failing tests in `lod.rs`: 1,000 bars into 300 columns gives 300
+- [x] 4. Write failing tests in `lod.rs`: 1,000 bars into 300 columns gives 300
    buckets whose boundaries match integer division; the same call twice gives
    identical buckets; 100 bars into 300 columns gives 100 single-bar buckets; a
    bucket's high and low equal the max and min of its bars, and a NaN high

@@ -15,6 +15,7 @@ pub mod contracts {
 
 pub mod column;
 pub mod frame;
+pub mod lod;
 pub mod series;
 pub mod window;
 
@@ -22,6 +23,7 @@ pub use column::{Bitmap, Column, ColumnType};
 pub use frame::{
     BarColumns, BarFrame, FieldDesc, FrameError, TimeLabel, VolumeSet, RESERVED_COLUMNS,
 };
+pub use lod::{reduce, reduce_into, Bucket};
 pub use series::{DirtyRange, LiveBarSeries, Revision, SeriesError, SeriesExtents};
 pub use window::RollingBarWindow;
 
