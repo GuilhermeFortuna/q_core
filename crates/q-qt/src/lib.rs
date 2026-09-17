@@ -12,7 +12,9 @@ pub mod ffi {
         type CoreInfo = super::CoreInfoRust;
     }
 }
+pub mod bar_series;
 
+pub use bar_series::{ffi::BarSeries, BarSeriesRust};
 use cxx_qt_lib::QString;
 
 pub struct CoreInfoRust {

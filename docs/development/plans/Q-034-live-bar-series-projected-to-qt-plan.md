@@ -221,7 +221,7 @@ pub fn pack(buckets: &[Bucket], view: Viewport, surface: Surface, out: &mut Vec<
    twice gives byte-identical output; a zero-height price range and a
    single-bar viewport both give finite coordinates. Implement `pack`. Confirm
    they pass. Commit.
-- [ ] 6. Add the `BarSeries` bridge to `q-qt` with its properties, invokables and
+- [x] 6. Add the `BarSeries` bridge to `q-qt` with its properties, invokables and
    the four C++-facing functions, delegating every computation to `q-buffers`.
    Write failing Rust tests that drive `load_history`, `ingest_completed` and
    `ingest_forming` with no event loop and assert bar count, extents, last price,
