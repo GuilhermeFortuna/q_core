@@ -15,6 +15,7 @@ pub struct Bucket {
     pub high: f64,
     pub low: f64,
     pub close: f64,
+    pub forming: bool,
 }
 
 /// Exact reduction of `range` to at most `columns` buckets.
@@ -66,6 +67,7 @@ pub fn reduce_into(
                 high: highs[bar_idx],
                 low: lows[bar_idx],
                 close: closes[bar_idx],
+                forming: false,
             });
         }
         return Ok(());
@@ -110,6 +112,7 @@ pub fn reduce_into(
             high,
             low,
             close,
+            forming: false,
         });
     }
 

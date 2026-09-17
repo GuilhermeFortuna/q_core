@@ -214,7 +214,7 @@ pub fn pack(buckets: &[Bucket], view: Viewport, surface: Surface, out: &mut Vec<
    propagates; an empty range gives no buckets; zero columns is an error;
    `reduce_into` on a pre-sized buffer allocates nothing. Implement. Confirm they
    pass. Commit.
-- [ ] 5. Write failing tests in `geometry.rs`: for a two-bucket viewport at a
+- [x] 5. Write failing tests in `geometry.rs`: for a two-bucket viewport at a
    known surface size, every packed vertex has its expected pixel coordinate;
    `direction` is 1.0 for a close above the open and -1.0 below; `forming` is
    1.0 only on the last bucket's vertices when the viewport includes it; packing
