@@ -675,4 +675,133 @@ mod tests {
         assert_eq!(series.completed().time(), &[100, 200]);
         assert_eq!(series.revision(), rev_before);
     }
+
+    #[test]
+    fn test_revision_advances_only_on_accepted_mutation() {
+        let mut series = LiveBarSeries::new(10, vols_none(), TimeLabel::Utc).unwrap();
+        let r0 = series.revision();
+
+        // Refused append (empty or not ascending)
+        assert!(series.append_completed(simple_bars(&[], 1.0)).is_err());
+        assert_eq!(series.revision(), r0);
+
+        assert!(series
+            .append_completed(simple_bars(&[100, 100], 1.0))
+            .is_err());
+        assert_eq!(series.revision(), r0);
+
+        // Accepted append
+        series.append_completed(simple_bars(&[100], 1.0)).unwrap();
+        let r1 = series.revision();
+        assert!(r1 > r0);
+
+        // Refused append before last
+        assert!(series.append_completed(simple_bars(&[50], 1.0)).is_err());
+        assert_eq!(series.revision(), r1);
+
+        // Refused forming (stale)
+        assert!(series.set_forming(simple_bars(&[100], 2.0)).is_err());
+        assert_eq!(series.revision(), r1);
+
+        // Accepted forming
+        series.set_forming(simple_bars(&[200], 2.0)).unwrap();
+        let r2 = series.revision();
+        assert!(r2 > r1);
+
+        // Clear forming
+        series.clear_forming();
+        let r3 = series.revision();
+        assert!(r3 > r2);
+
+        // Clear forming again (no-op)
+        series.clear_forming();
+        assert_eq!(series.revision(), r3);
+
+        // Refused load history
+        assert!(series.load_history(simple_bars(&[10, 5], 1.0)).is_err());
+        assert_eq!(series.revision(), r3);
+
+        // Accepted load history
+        series.load_history(simple_bars(&[10, 20], 1.0)).unwrap();
+        let r4 = series.revision();
+        assert!(r4 > r3);
+    }
+
+    #[test]
+    fn test_dirty_since_append_replace_forming() {
+        let mut series = LiveBarSeries::new(20, vols_none(), TimeLabel::Utc).unwrap();
+        series
+            .load_history(simple_bars(&[100, 200, 300, 400, 500], 10.0))
+            .unwrap();
+        let r_hist = series.revision();
+        assert_eq!(series.dirty_since(r_hist), DirtyRange::None);
+
+        // Append 2 bars
+        series
+            .append_completed(simple_bars(&[600, 700], 20.0))
+            .unwrap();
+        let r_app = series.revision();
+        assert_eq!(
+            series.dirty_since(r_hist),
+            DirtyRange::Bars { start: 5, end: 7 }
+        );
+        assert_eq!(series.dirty_since(r_app), DirtyRange::None);
+
+        // Replace last bar at 700
+        series.append_completed(simple_bars(&[700], 25.0)).unwrap();
+        let r_rep = series.revision();
+        assert_eq!(
+            series.dirty_since(r_app),
+            DirtyRange::Bars { start: 6, end: 7 }
+        );
+        assert_eq!(
+            series.dirty_since(r_hist),
+            DirtyRange::Bars { start: 5, end: 7 }
+        );
+        assert_eq!(series.dirty_since(r_rep), DirtyRange::None);
+
+        // Set forming bar at 800
+        series.set_forming(simple_bars(&[800], 30.0)).unwrap();
+        let r_form = series.revision();
+        assert_eq!(
+            series.dirty_since(r_rep),
+            DirtyRange::Bars { start: 7, end: 8 }
+        );
+        assert_eq!(
+            series.dirty_since(r_app),
+            DirtyRange::Bars { start: 6, end: 8 }
+        );
+        assert_eq!(
+            series.dirty_since(r_hist),
+            DirtyRange::Bars { start: 5, end: 8 }
+        );
+        assert_eq!(series.dirty_since(r_form), DirtyRange::None);
+    }
+
+    #[test]
+    fn test_dirty_since_too_old_after_load_history_and_capacity_drop() {
+        let mut series = LiveBarSeries::new(10, vols_none(), TimeLabel::Utc).unwrap();
+        series
+            .append_completed(simple_bars(&[100, 200], 10.0))
+            .unwrap();
+        let r_prev = series.revision();
+
+        // load_history makes any prior revision TooOld
+        series
+            .load_history(simple_bars(&[300, 400, 500], 15.0))
+            .unwrap();
+        assert_eq!(series.dirty_since(r_prev), DirtyRange::TooOld);
+        assert_eq!(series.dirty_since(series.revision()), DirtyRange::None);
+
+        // capacity drop makes prior revisions TooOld
+        let mut bounded = LiveBarSeries::new(3, vols_none(), TimeLabel::Utc).unwrap();
+        bounded
+            .append_completed(simple_bars(&[10, 20, 30], 1.0))
+            .unwrap();
+        let r_full = bounded.revision();
+
+        bounded.append_completed(simple_bars(&[40], 2.0)).unwrap();
+        assert_eq!(bounded.dirty_since(r_full), DirtyRange::TooOld);
+        assert_eq!(bounded.dirty_since(bounded.revision()), DirtyRange::None);
+    }
 }

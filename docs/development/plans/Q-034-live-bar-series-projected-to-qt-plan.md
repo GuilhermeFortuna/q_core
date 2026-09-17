@@ -202,7 +202,7 @@ pub fn pack(buckets: &[Bucket], view: Viewport, surface: Surface, out: &mut Vec<
    completed bar at the forming time clears the forming bar; a failed
    `load_history` leaves the previous series intact. Implement `LiveBarSeries`.
    Confirm they pass. Commit.
-- [ ] 3. Write failing tests for revision and dirty tracking: the counter advances
+- [x] 3. Write failing tests for revision and dirty tracking: the counter advances
    on each accepted mutation and not on a refused one; `dirty_since` covers
    exactly the changed bars after an append, a replace and a forming change;
    after `load_history` and after a capacity drop it is `TooOld`; `dirty_since`
