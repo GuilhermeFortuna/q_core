@@ -191,10 +191,10 @@ pub fn pack(buckets: &[Bucket], view: Viewport, surface: Surface, out: &mut Vec<
 
 ## Ordered implementation
 
-- [ ] 1. Work on the branch `Q-034-live-bar-series-projected-to-qt` in `q_core`,
+- [x] 1. Work on the branch `Q-034-live-bar-series-projected-to-qt` in `q_core`,
    created from `development` by `./work start`. Confirm Q-033 has merged into
    `development` and that `make check` passes on it before changing anything.
-- [ ] 2. Write failing tests in `series.rs`: append extends; an equal-time bar
+- [x] 2. Write failing tests in `series.rs`: append extends; an equal-time bar
    replaces the last; a batch starting before the last bar gives `BeforeLast`
    naming the position and leaves length and revision unchanged; an internally
    unordered batch gives `NotAscending`; capacity 3 with 5 bars keeps the last
@@ -202,39 +202,39 @@ pub fn pack(buckets: &[Bucket], view: Viewport, surface: Surface, out: &mut Vec<
    completed bar at the forming time clears the forming bar; a failed
    `load_history` leaves the previous series intact. Implement `LiveBarSeries`.
    Confirm they pass. Commit.
-- [ ] 3. Write failing tests for revision and dirty tracking: the counter advances
+- [x] 3. Write failing tests for revision and dirty tracking: the counter advances
    on each accepted mutation and not on a refused one; `dirty_since` covers
    exactly the changed bars after an append, a replace and a forming change;
    after `load_history` and after a capacity drop it is `TooOld`; `dirty_since`
    at the current revision is `None`. Implement. Confirm they pass. Commit.
-- [ ] 4. Write failing tests in `lod.rs`: 1,000 bars into 300 columns gives 300
+- [x] 4. Write failing tests in `lod.rs`: 1,000 bars into 300 columns gives 300
    buckets whose boundaries match integer division; the same call twice gives
    identical buckets; 100 bars into 300 columns gives 100 single-bar buckets; a
    bucket's high and low equal the max and min of its bars, and a NaN high
    propagates; an empty range gives no buckets; zero columns is an error;
    `reduce_into` on a pre-sized buffer allocates nothing. Implement. Confirm they
    pass. Commit.
-- [ ] 5. Write failing tests in `geometry.rs`: for a two-bucket viewport at a
+- [x] 5. Write failing tests in `geometry.rs`: for a two-bucket viewport at a
    known surface size, every packed vertex has its expected pixel coordinate;
    `direction` is 1.0 for a close above the open and -1.0 below; `forming` is
    1.0 only on the last bucket's vertices when the viewport includes it; packing
    twice gives byte-identical output; a zero-height price range and a
    single-bar viewport both give finite coordinates. Implement `pack`. Confirm
    they pass. Commit.
-- [ ] 6. Add the `BarSeries` bridge to `q-qt` with its properties, invokables and
+- [x] 6. Add the `BarSeries` bridge to `q-qt` with its properties, invokables and
    the four C++-facing functions, delegating every computation to `q-buffers`.
    Write failing Rust tests that drive `load_history`, `ingest_completed` and
    `ingest_forming` with no event loop and assert bar count, extents, last price,
    forming flag, geometry revision and vertex length. Implement. Confirm they
    pass. Commit.
-- [ ] 7. Extend `crates/q-qt/tests/harness.cpp`: construct a `BarSeries`, load a
+- [x] 7. Extend `crates/q-qt/tests/harness.cpp`: construct a `BarSeries`, load a
    generated history, set a viewport and surface, call `rebuild_geometry`, read
    the pointer and length, assert the first and last vertices and that the
    revision advances only on mutation. Confirm `make qt-test` passes. Commit.
-- [ ] 8. Add `bench-bar-geometry` to the `Makefile`: 500,000 bars, viewports of
+- [x] 8. Add `bench-bar-geometry` to the `Makefile`: 500,000 bars, viewports of
    500, 2,000 and 8,000 buckets, five runs each, reporting individual and median
    times and the allocation count after the first call. Commit.
-- [ ] 9. Run `make check`. Confirm `make wheel-test` shows an unchanged Python
+- [x] 9. Run `make check`. Confirm `make wheel-test` shows an unchanged Python
    surface and `make parity-isolation` passes. Fix, re-run, commit.
 - [ ] 10. **Human:** run `make qt-test` against a series loaded from a real lake
    dataset and `make bench-bar-geometry` on the target machine; report both.
