@@ -234,7 +234,7 @@ pub fn pack(buckets: &[Bucket], view: Viewport, surface: Surface, out: &mut Vec<
 - [x] 8. Add `bench-bar-geometry` to the `Makefile`: 500,000 bars, viewports of
    500, 2,000 and 8,000 buckets, five runs each, reporting individual and median
    times and the allocation count after the first call. Commit.
-- [ ] 9. Run `make check`. Confirm `make wheel-test` shows an unchanged Python
+- [x] 9. Run `make check`. Confirm `make wheel-test` shows an unchanged Python
    surface and `make parity-isolation` passes. Fix, re-run, commit.
 - [ ] 10. **Human:** run `make qt-test` against a series loaded from a real lake
    dataset and `make bench-bar-geometry` on the target machine; report both.
