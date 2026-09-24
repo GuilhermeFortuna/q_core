@@ -38,7 +38,7 @@ replacement.
 
 ## Ordered implementation
 
-- [ ] **1. Lock output parity in `q-buffers`.** Add tests in
+- [x] **1. Lock output parity in `q-buffers`.** Add tests in
   `crates/q-buffers/src/geometry.rs` that pack completed buckets and a final
   forming bucket separately, concatenate the outputs, and compare all four
   vertex fields bit for bit with one legacy `pack()` call. Cover rising and
@@ -46,7 +46,7 @@ replacement.
   `reduce_into()`. Factor a single-bucket helper from `pack()` so both paths
   use the same x/y and flag arithmetic. Run the crate's focused tests.
 
-- [ ] **2. Add split storage and invalidation to `q-qt`.** In
+- [x] **2. Add split storage and invalidation to `q-qt`.** In
   `crates/q-qt/src/bar_series.rs`, add independent reusable `q-buffers` and
   FFI vertex vectors for completed and forming output, plus their revisions.
   Increment completed-data generation after successful history or completed
@@ -60,7 +60,7 @@ replacement.
   `rebuild_geometry()` operational. Add focused Rust tests for each invalidation
   and for unchanged completed pointer, bytes, and revision across forming ticks.
 
-- [ ] **3. Expose and verify the CXX-Qt API.** Declare and implement
+- [x] **3. Expose and verify the CXX-Qt API.** Declare and implement
   `rebuild_split_geometry()` and the six pointer/length/revision accessors in
   `crates/q-qt/src/bar_series.rs`. Extend
   `crates/q-qt/tests/harness.cpp` to check both slices' lengths, flag values,
@@ -68,7 +68,7 @@ replacement.
   forming clear, and full invalidation on completed append and viewport
   change. Run `make qt-test` and the existing combined-API harness cases.
 
-- [ ] **4. Measure and finish.** Extend `make bench-bar-geometry` with a
+- [x] **4. Measure and finish.** Extend `make bench-bar-geometry` with a
   500,000-bar split-path forming workload at 500, 2,000, and 8,000 visible
   buckets. Warm it before reporting time and allocations; compare the existing
   combined path and the split path, and verify that the completed revision and

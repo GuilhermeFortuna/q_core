@@ -27,16 +27,15 @@ pub struct BarVertex {
     pub forming: f32,
 }
 
-/// Packs bodies and wicks for `buckets` into `out`, reusing its capacity.
-pub fn pack(buckets: &[Bucket], view: Viewport, surface: Surface, out: &mut Vec<BarVertex>) {
-    out.clear();
-
-    if buckets.is_empty() || surface.width_px <= 0.0 || surface.height_px <= 0.0 {
-        return;
-    }
-
-    out.reserve(buckets.len() * 12);
-
+/// Appends 12 vertices for one `bucket` to `out`.
+pub fn pack_bucket(
+    bucket: &Bucket,
+    bucket_index: usize,
+    bucket_count: usize,
+    view: Viewport,
+    surface: Surface,
+    out: &mut Vec<BarVertex>,
+) {
     let price_range = view.high - view.low;
     let price_to_y = |p: f64| -> f32 {
         if !price_range.is_finite() || price_range <= 0.0 {
@@ -53,133 +52,154 @@ pub fn pack(buckets: &[Bucket], view: Viewport, surface: Surface, out: &mut Vec<
         0.0
     };
 
+    let (x_center, col_width) = if total_bars > 0.0 {
+        let bar_center = (bucket.start as f32 + bucket.end as f32) * 0.5;
+        let norm_x = (bar_center - view.first_bar as f32) / total_bars;
+        let bar_span = (bucket.end - bucket.start) as f32;
+        let width = (bar_span / total_bars) * surface.width_px;
+        (norm_x * surface.width_px, width.max(1.0))
+    } else {
+        let width = (surface.width_px / bucket_count as f32).max(1.0);
+        let center = (bucket_index as f32 + 0.5) * width;
+        (center, width)
+    };
+
+    let body_width = (col_width * 0.8).max(1.0);
+    let half_body = body_width * 0.5;
+    let body_left = x_center - half_body;
+    let body_right = x_center + half_body;
+
+    let wick_width = 1.0f32;
+    let half_wick = wick_width * 0.5;
+    let wick_left = x_center - half_wick;
+    let wick_right = x_center + half_wick;
+
+    let y_open = price_to_y(bucket.open);
+    let y_close = price_to_y(bucket.close);
+    let y_high = price_to_y(bucket.high);
+    let y_low = price_to_y(bucket.low);
+
+    let body_top = y_open.min(y_close);
+    let mut body_bottom = y_open.max(y_close);
+    if body_bottom - body_top < 1.0 {
+        body_bottom = body_top + 1.0;
+    }
+
+    let wick_top = y_high.min(y_low);
+    let mut wick_bottom = y_high.max(y_low);
+    if wick_bottom - wick_top < 1.0 {
+        wick_bottom = wick_top + 1.0;
+    }
+
+    let direction = if bucket.close >= bucket.open {
+        1.0f32
+    } else {
+        -1.0f32
+    };
+    let is_forming =
+        bucket.forming && (bucket.start < view.last_bar && bucket.end > view.first_bar);
+    let forming = if is_forming { 1.0f32 } else { 0.0f32 };
+
+    // 1. Wick quad (2 triangles = 6 vertices)
+    out.push(BarVertex {
+        x: wick_left,
+        y: wick_top,
+        direction,
+        forming,
+    });
+    out.push(BarVertex {
+        x: wick_right,
+        y: wick_top,
+        direction,
+        forming,
+    });
+    out.push(BarVertex {
+        x: wick_left,
+        y: wick_bottom,
+        direction,
+        forming,
+    });
+
+    out.push(BarVertex {
+        x: wick_left,
+        y: wick_bottom,
+        direction,
+        forming,
+    });
+    out.push(BarVertex {
+        x: wick_right,
+        y: wick_top,
+        direction,
+        forming,
+    });
+    out.push(BarVertex {
+        x: wick_right,
+        y: wick_bottom,
+        direction,
+        forming,
+    });
+
+    // 2. Body quad (2 triangles = 6 vertices)
+    out.push(BarVertex {
+        x: body_left,
+        y: body_top,
+        direction,
+        forming,
+    });
+    out.push(BarVertex {
+        x: body_right,
+        y: body_top,
+        direction,
+        forming,
+    });
+    out.push(BarVertex {
+        x: body_left,
+        y: body_bottom,
+        direction,
+        forming,
+    });
+
+    out.push(BarVertex {
+        x: body_left,
+        y: body_bottom,
+        direction,
+        forming,
+    });
+    out.push(BarVertex {
+        x: body_right,
+        y: body_top,
+        direction,
+        forming,
+    });
+    out.push(BarVertex {
+        x: body_right,
+        y: body_bottom,
+        direction,
+        forming,
+    });
+}
+
+/// Packs bodies and wicks for `buckets` into `out`, reusing its capacity.
+pub fn pack(buckets: &[Bucket], view: Viewport, surface: Surface, out: &mut Vec<BarVertex>) {
+    out.clear();
+
+    if buckets.is_empty() || surface.width_px <= 0.0 || surface.height_px <= 0.0 {
+        return;
+    }
+
+    out.reserve(buckets.len() * 12);
+
+    let bucket_count = buckets.len();
     for (i, b) in buckets.iter().enumerate() {
-        let (x_center, col_width) = if total_bars > 0.0 {
-            let bar_center = (b.start as f32 + b.end as f32) * 0.5;
-            let norm_x = (bar_center - view.first_bar as f32) / total_bars;
-            let bar_span = (b.end - b.start) as f32;
-            let width = (bar_span / total_bars) * surface.width_px;
-            (norm_x * surface.width_px, width.max(1.0))
-        } else {
-            let width = (surface.width_px / buckets.len() as f32).max(1.0);
-            let center = (i as f32 + 0.5) * width;
-            (center, width)
-        };
-
-        let body_width = (col_width * 0.8).max(1.0);
-        let half_body = body_width * 0.5;
-        let body_left = x_center - half_body;
-        let body_right = x_center + half_body;
-
-        let wick_width = 1.0f32;
-        let half_wick = wick_width * 0.5;
-        let wick_left = x_center - half_wick;
-        let wick_right = x_center + half_wick;
-
-        let y_open = price_to_y(b.open);
-        let y_close = price_to_y(b.close);
-        let y_high = price_to_y(b.high);
-        let y_low = price_to_y(b.low);
-
-        let body_top = y_open.min(y_close);
-        let mut body_bottom = y_open.max(y_close);
-        if body_bottom - body_top < 1.0 {
-            body_bottom = body_top + 1.0;
-        }
-
-        let wick_top = y_high.min(y_low);
-        let mut wick_bottom = y_high.max(y_low);
-        if wick_bottom - wick_top < 1.0 {
-            wick_bottom = wick_top + 1.0;
-        }
-
-        let direction = if b.close >= b.open { 1.0f32 } else { -1.0f32 };
-        let is_forming = b.forming && (b.start < view.last_bar && b.end > view.first_bar);
-        let forming = if is_forming { 1.0f32 } else { 0.0f32 };
-
-        // 1. Wick quad (2 triangles = 6 vertices)
-        out.push(BarVertex {
-            x: wick_left,
-            y: wick_top,
-            direction,
-            forming,
-        });
-        out.push(BarVertex {
-            x: wick_right,
-            y: wick_top,
-            direction,
-            forming,
-        });
-        out.push(BarVertex {
-            x: wick_left,
-            y: wick_bottom,
-            direction,
-            forming,
-        });
-
-        out.push(BarVertex {
-            x: wick_left,
-            y: wick_bottom,
-            direction,
-            forming,
-        });
-        out.push(BarVertex {
-            x: wick_right,
-            y: wick_top,
-            direction,
-            forming,
-        });
-        out.push(BarVertex {
-            x: wick_right,
-            y: wick_bottom,
-            direction,
-            forming,
-        });
-
-        // 2. Body quad (2 triangles = 6 vertices)
-        out.push(BarVertex {
-            x: body_left,
-            y: body_top,
-            direction,
-            forming,
-        });
-        out.push(BarVertex {
-            x: body_right,
-            y: body_top,
-            direction,
-            forming,
-        });
-        out.push(BarVertex {
-            x: body_left,
-            y: body_bottom,
-            direction,
-            forming,
-        });
-
-        out.push(BarVertex {
-            x: body_left,
-            y: body_bottom,
-            direction,
-            forming,
-        });
-        out.push(BarVertex {
-            x: body_right,
-            y: body_top,
-            direction,
-            forming,
-        });
-        out.push(BarVertex {
-            x: body_right,
-            y: body_bottom,
-            direction,
-            forming,
-        });
+        pack_bucket(b, i, bucket_count, view, surface, out);
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::lod::reduce_into;
+    use crate::{BarColumns, BarFrame, TimeLabel};
 
     fn assert_vertex_bits_eq(a: BarVertex, b: BarVertex) {
         assert_eq!(a.x.to_bits(), b.x.to_bits());
@@ -532,5 +552,190 @@ mod tests {
             assert!(!v.x.is_nan());
             assert!(!v.y.is_nan());
         }
+    }
+
+    fn assert_vertices_equal(a: &[BarVertex], b: &[BarVertex]) {
+        assert_eq!(a.len(), b.len());
+        for (v1, v2) in a.iter().zip(b.iter()) {
+            assert_vertex_bits_eq(*v1, *v2);
+        }
+    }
+
+    fn pack_split(buckets: &[Bucket], view: Viewport, surface: Surface) -> Vec<BarVertex> {
+        let completed = buckets.iter().filter(|b| !b.forming).collect::<Vec<_>>();
+        let forming = buckets.iter().find(|b| b.forming);
+
+        let mut out = Vec::new();
+        if !completed.is_empty() {
+            let count = completed.len();
+            for (i, b) in completed.iter().enumerate() {
+                pack_bucket(b, i, count, view, surface, &mut out);
+            }
+        }
+        if let Some(b) = forming {
+            pack_bucket(b, 0, 1, view, surface, &mut out);
+        }
+        out
+    }
+
+    #[allow(clippy::suboptimal_flops)]
+    fn make_frame(n: usize, flat_price: bool) -> BarFrame {
+        let mut open = Vec::with_capacity(n);
+        let mut high = Vec::with_capacity(n);
+        let mut low = Vec::with_capacity(n);
+        let mut close = Vec::with_capacity(n);
+        let mut time = Vec::with_capacity(n);
+        for i in 0..n {
+            time.push((i as i64 + 1) * 60);
+            if flat_price {
+                open.push(50.0);
+                high.push(50.0);
+                low.push(50.0);
+                close.push(50.0);
+            } else {
+                let o = 100.0 + (i as f64) * 0.5;
+                open.push(o);
+                high.push(o + 2.0);
+                low.push(o - 1.5);
+                close.push(if i % 2 == 0 { o + 1.0 } else { o - 0.5 });
+            }
+        }
+        BarFrame::try_new(BarColumns {
+            time,
+            open,
+            high,
+            low,
+            close,
+            tick_volume: None,
+            spread: None,
+            real_volume: None,
+            label: TimeLabel::Utc,
+        })
+        .expect("valid frame")
+    }
+
+    #[test]
+    fn test_split_pack_matches_legacy_rising_falling_and_forming() {
+        let view = Viewport {
+            first_bar: 0,
+            last_bar: 2,
+            low: 0.0,
+            high: 100.0,
+        };
+        let surface = Surface {
+            width_px: 200.0,
+            height_px: 100.0,
+        };
+        let buckets = vec![
+            Bucket {
+                start: 0,
+                end: 1,
+                open: 20.0,
+                high: 80.0,
+                low: 10.0,
+                close: 60.0,
+                forming: false,
+            },
+            Bucket {
+                start: 1,
+                end: 2,
+                open: 70.0,
+                high: 90.0,
+                low: 30.0,
+                close: 40.0,
+                forming: true,
+            },
+        ];
+
+        let mut legacy = Vec::new();
+        pack(&buckets, view, surface, &mut legacy);
+        let split = pack_split(&buckets, view, surface);
+        assert_vertices_equal(&legacy, &split);
+    }
+
+    #[test]
+    fn test_split_pack_matches_legacy_flat_price_and_single_bar() {
+        let surface = Surface {
+            width_px: 100.0,
+            height_px: 100.0,
+        };
+
+        let view_flat = Viewport {
+            first_bar: 0,
+            last_bar: 1,
+            low: 50.0,
+            high: 50.0,
+        };
+        let flat_bucket = vec![Bucket {
+            start: 0,
+            end: 1,
+            open: 50.0,
+            high: 50.0,
+            low: 50.0,
+            close: 50.0,
+            forming: false,
+        }];
+        let mut legacy_flat = Vec::new();
+        pack(&flat_bucket, view_flat, surface, &mut legacy_flat);
+        assert_vertices_equal(&legacy_flat, &pack_split(&flat_bucket, view_flat, surface));
+
+        let view_single = Viewport {
+            first_bar: 5,
+            last_bar: 6,
+            low: 10.0,
+            high: 20.0,
+        };
+        let single_bucket = vec![Bucket {
+            start: 5,
+            end: 6,
+            open: 12.0,
+            high: 18.0,
+            low: 11.0,
+            close: 16.0,
+            forming: false,
+        }];
+        let mut legacy_single = Vec::new();
+        pack(&single_bucket, view_single, surface, &mut legacy_single);
+        assert_vertices_equal(
+            &legacy_single,
+            &pack_split(&single_bucket, view_single, surface),
+        );
+    }
+
+    #[test]
+    fn test_split_pack_matches_legacy_lod_buckets_with_forming() {
+        let frame = make_frame(100, false);
+        let view = Viewport {
+            first_bar: 0,
+            last_bar: 100,
+            low: 90.0,
+            high: 160.0,
+        };
+        let surface = Surface {
+            width_px: 50.0,
+            height_px: 300.0,
+        };
+
+        let mut completed_buckets = Vec::new();
+        reduce_into(&frame, 0..99, 50, &mut completed_buckets).expect("reduce");
+
+        let forming_bucket = Bucket {
+            start: 99,
+            end: 100,
+            open: frame.open()[99],
+            high: frame.high()[99],
+            low: frame.low()[99],
+            close: frame.close()[99],
+            forming: true,
+        };
+
+        let mut combined = completed_buckets.clone();
+        combined.push(forming_bucket);
+
+        let mut legacy = Vec::new();
+        pack(&combined, view, surface, &mut legacy);
+        let split = pack_split(&combined, view, surface);
+        assert_vertices_equal(&legacy, &split);
+        assert_eq!(legacy.len(), combined.len() * 12);
     }
 }
