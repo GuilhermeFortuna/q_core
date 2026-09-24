@@ -21,7 +21,7 @@ int main(int argc, char** argv) {
 
     assert(!version.isEmpty());
     assert(!contracts_rev.isEmpty());
-    assert(version.toStdString() == "2026.9.16");
+    assert(version.toStdString() == "2026.9.24");
 
     // --- BarSeries tests ---
     BarSeries series;
@@ -107,7 +107,7 @@ int main(int argc, char** argv) {
     assert(split_series.forming_geometry_revision() == 0);
 
     split_series.load_history_sample(100);
-    split_series.set_viewport(0, 100, split_series.getLow(), split_series.getHigh());
+    split_series.set_viewport(0, 101, split_series.getLow(), split_series.getHigh());
     split_series.set_surface(800.0f, 600.0f);
     split_series.rebuild_split_geometry();
 
@@ -123,7 +123,6 @@ int main(int argc, char** argv) {
 
     int64_t forming_time_split = split_series.getLast_time() + 60;
     double forming_open_split = split_series.getLast_price();
-    split_series.set_viewport(0, 101, split_series.getLow(), split_series.getHigh());
     split_series.ingest_forming_bar(
         forming_time_split,
         forming_open_split,
