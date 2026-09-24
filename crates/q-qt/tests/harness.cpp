@@ -97,6 +97,69 @@ int main(int argc, char** argv) {
     assert(!series.getHas_forming());
     assert(series.getRevision() == 3); // advanced on mutation!
 
+    // --- Split geometry API ---
+    BarSeries split_series;
+    assert(split_series.completed_vertex_ptr() == nullptr);
+    assert(split_series.completed_vertex_len() == 0);
+    assert(split_series.completed_geometry_revision() == 0);
+    assert(split_series.forming_vertex_ptr() == nullptr);
+    assert(split_series.forming_vertex_len() == 0);
+    assert(split_series.forming_geometry_revision() == 0);
+
+    split_series.load_history_sample(100);
+    split_series.set_viewport(0, 100, split_series.getLow(), split_series.getHigh());
+    split_series.set_surface(800.0f, 600.0f);
+    split_series.rebuild_split_geometry();
+
+    assert(split_series.completed_geometry_revision() == 1);
+    assert(split_series.forming_geometry_revision() == 0);
+    assert(split_series.completed_vertex_len() == 100 * 12);
+    assert(split_series.forming_vertex_len() == 0);
+    assert(split_series.completed_vertex_ptr() != nullptr);
+    assert(split_series.forming_vertex_ptr() == nullptr);
+
+    const BarVertex* completed_ptr = split_series.completed_vertex_ptr();
+    int64_t completed_rev = split_series.completed_geometry_revision();
+
+    int64_t forming_time_split = split_series.getLast_time() + 60;
+    double forming_open_split = split_series.getLast_price();
+    split_series.set_viewport(0, 101, split_series.getLow(), split_series.getHigh());
+    split_series.ingest_forming_bar(
+        forming_time_split,
+        forming_open_split,
+        forming_open_split + 2.0,
+        forming_open_split - 1.0,
+        forming_open_split + 1.0,
+        25.0);
+    split_series.rebuild_split_geometry();
+
+    assert(split_series.completed_vertex_ptr() == completed_ptr);
+    assert(split_series.completed_geometry_revision() == completed_rev);
+    assert(split_series.completed_vertex_len() == 100 * 12);
+    assert(split_series.forming_vertex_len() == 12);
+    assert(split_series.forming_geometry_revision() == 1);
+    assert(split_series.forming_vertex_ptr() != nullptr);
+    assert(split_series.forming_vertex_ptr()[11].forming == 1.0f);
+
+    split_series.clear_forming_bar();
+    split_series.rebuild_split_geometry();
+    assert(split_series.forming_vertex_len() == 0);
+    assert(split_series.forming_vertex_ptr() == nullptr);
+    assert(split_series.forming_geometry_revision() == 2);
+    assert(split_series.completed_geometry_revision() == completed_rev);
+
+    split_series.ingest_completed_bar(
+        forming_time_split,
+        forming_open_split,
+        forming_open_split + 2.0,
+        forming_open_split - 1.0,
+        forming_open_split + 1.0,
+        25.0);
+    split_series.set_viewport(0, 102, split_series.getLow(), split_series.getHigh());
+    split_series.rebuild_split_geometry();
+    assert(split_series.completed_geometry_revision() > completed_rev);
+    assert(split_series.completed_vertex_len() == 101 * 12);
+
     // Optional: Real lake dataset testing if Q_LAKE_PATH is provided
     const char* lake_env = std::getenv("Q_LAKE_PATH");
     if (lake_env != nullptr && std::strlen(lake_env) > 0) {
