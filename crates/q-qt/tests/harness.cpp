@@ -21,7 +21,9 @@ int main(int argc, char** argv) {
 
     assert(!version.isEmpty());
     assert(!contracts_rev.isEmpty());
-    assert(version.toStdString() == "2026.9.24");
+#ifdef Q_CORE_VERSION
+    assert(version.toStdString() == Q_CORE_VERSION);
+#endif
 
     // --- BarSeries tests ---
     BarSeries series;

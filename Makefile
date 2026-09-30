@@ -8,6 +8,7 @@ NUMERIC_FAMILIES := indicators
 BACKEND_FAMILIES := bar_window exit_rules candle_engine decision_step tick_kernel tick_bars
 MATURIN ?= $(shell command -v maturin 2>/dev/null || echo "uvx maturin")
 QT_MINIMAL_DIR ?= $(shell find $(HOME)/.local/share/qt_minimal_download -name "QtCore" -type d 2>/dev/null | head -n 1)/../..
+Q_CORE_VERSION ?= $(shell sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -n 1)
 
 check: fmt-check lint test fixtures-test fixtures-check parity-isolation wheel-test qt-test contracts-check
 	@echo "All workspace checks passed successfully."
@@ -122,6 +123,7 @@ qt-test: qt
 	inc_cxx_qt_lib=$$(find target/debug/build -path "*/cxx-qt-lib-*/out/cxxqtbuild/include" 2>/dev/null | head -n 1); \
 	qt_dir="$(QT_MINIMAL_DIR)"; \
 	g++ -std=c++17 crates/q-qt/tests/harness.cpp -o target/debug/qt_harness \
+		-DQ_CORE_VERSION=\"$(Q_CORE_VERSION)\" \
 		-I "$$inc_q_qt" \
 		-I "$$inc_cxx_qt_lib" \
 		-I "$$qt_dir/include" \
