@@ -31,21 +31,21 @@ state, commits the forming input and discards the clone.
 
 ## Ordered implementation
 
-- [ ] **1. Primitive states.** Extract the loop state of `rolling_mean`, `rolling_var`
+- [x] **1. Primitive states.** Extract the loop state of `rolling_mean`, `rolling_var`
   and `ewm_mean` into state structs. The rolling states keep a ring of the last `window`
   prepared inputs for removal. Prove bitwise equality against the batch function for
   every prefix on the reference inputs before building on them. Run
   `cargo test -p q-indicators`.
-- [ ] **2. Study states.** Compose SMA, EMA, Bollinger (mean plus std, same `ddof`), RSI
+- [x] **2. Study states.** Compose SMA, EMA, Bollinger (mean plus std, same `ddof`), RSI
   (diff, gain/loss split, two EWM states) and ATR (previous close, true range, then its
   smoother) exactly as the batch functions do, including their `min_periods` and NaN
   handling. Add `preview` and `reset`. Test commit parity, preview/commit equivalence
   and state immutability under preview.
-- [ ] **3. Session VWAP.** Implement batch `session_vwap` and `SessionVwapState` with
+- [x] **3. Session VWAP.** Implement batch `session_vwap` and `SessionVwapState` with
   cumulative `Σv·tp`, `Σv` and a numerically stable weighted-variance accumulator. Define
   the summation order once and use it on both paths. Add the hand-computed fixtures from
   the spec, plus determinism and prefix-causality checks through `q-parity`.
-- [ ] **4. Docs and handoff.** List the streaming studies and `session_vwap` in the
+- [x] **4. Docs and handoff.** List the streaming studies and `session_vwap` in the
   `q-indicators` row of `README.md`. Run `make check`. Commit focused changes and set
   Q-074 to In Review through `./work board set` with test results. The release tag is
   cut by `./work finish Q-074`.

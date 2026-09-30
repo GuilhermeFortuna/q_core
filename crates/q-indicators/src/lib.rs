@@ -9,12 +9,14 @@ mod error;
 mod ieee;
 mod indicators;
 mod moving_averages;
+mod streaming;
 mod transforms;
 mod window;
 
 pub use error::IndicatorError;
 pub use indicators::*;
 pub use moving_averages::*;
+pub use streaming::*;
 pub use transforms::*;
 
 /// Build identity for this crate (kernels and `IndicatorError` are also public).

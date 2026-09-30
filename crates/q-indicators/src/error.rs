@@ -19,6 +19,13 @@ pub enum IndicatorError {
         expected: usize,
         actual: usize,
     },
+    /// An input value outside acceptable range.
+    InvalidInput {
+        function: &'static str,
+        parameter: &'static str,
+        value: f64,
+        requirement: &'static str,
+    },
 }
 
 impl core::fmt::Display for IndicatorError {
@@ -42,6 +49,15 @@ impl core::fmt::Display for IndicatorError {
                 expected,
                 actual,
             } => write!(f, "{function}: {parameter} length {actual} != {expected}"),
+            Self::InvalidInput {
+                function,
+                parameter,
+                value,
+                requirement,
+            } => write!(
+                f,
+                "{function}: {parameter} must be {requirement} (got {value})"
+            ),
         }
     }
 }
