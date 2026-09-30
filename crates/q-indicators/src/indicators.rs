@@ -5,7 +5,7 @@ use crate::error::IndicatorError;
 use crate::ieee::{com_from_alpha_period, com_from_span};
 use crate::window::{ewm_mean, rolling_max, rolling_mean, rolling_min, rolling_std, rolling_var};
 
-fn nan_skipping_max3(a: f64, b: f64, c: f64) -> f64 {
+pub(crate) fn nan_skipping_max3(a: f64, b: f64, c: f64) -> f64 {
     let mut out = f64::NAN;
     for x in [a, b, c] {
         if x.is_nan() {
@@ -310,6 +310,72 @@ pub fn atr(
         com_from_alpha_period(period),
         period as usize,
     ))
+}
+
+/// Session VWAP and volume-weighted standard deviation.
+#[derive(Debug, Clone, PartialEq)]
+pub struct SessionVwap {
+    pub vwap: Vec<f64>,
+    pub std_dev: Vec<f64>,
+}
+
+/// Volume-weighted average price (VWAP) and volume-weighted standard deviation of typical price.
+pub fn session_vwap(
+    high: &[f64],
+    low: &[f64],
+    close: &[f64],
+    volume: &[f64],
+    session: &[i64],
+) -> Result<SessionVwap, IndicatorError> {
+    let n = close.len();
+    if high.len() != n {
+        return Err(IndicatorError::LengthMismatch {
+            function: "session_vwap",
+            parameter: "high",
+            expected: n,
+            actual: high.len(),
+        });
+    }
+    if low.len() != n {
+        return Err(IndicatorError::LengthMismatch {
+            function: "session_vwap",
+            parameter: "low",
+            expected: n,
+            actual: low.len(),
+        });
+    }
+    if volume.len() != n {
+        return Err(IndicatorError::LengthMismatch {
+            function: "session_vwap",
+            parameter: "volume",
+            expected: n,
+            actual: volume.len(),
+        });
+    }
+    if session.len() != n {
+        return Err(IndicatorError::LengthMismatch {
+            function: "session_vwap",
+            parameter: "session",
+            expected: n,
+            actual: session.len(),
+        });
+    }
+
+    let mut state = crate::streaming::SessionVwapState::new();
+    let mut vwap = Vec::with_capacity(n);
+    let mut std_dev = Vec::with_capacity(n);
+    for i in 0..n {
+        let out = state.commit(crate::streaming::SessionVwapInput {
+            high: high[i],
+            low: low[i],
+            close: close[i],
+            volume: volume[i],
+            session: session[i],
+        })?;
+        vwap.push(out.vwap);
+        std_dev.push(out.std_dev);
+    }
+    Ok(SessionVwap { vwap, std_dev })
 }
 
 #[cfg(test)]

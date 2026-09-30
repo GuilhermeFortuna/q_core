@@ -87,98 +87,140 @@ fn remove_mean(
     }
 }
 
-/// Pandas `roll_mean` with FixedWindowIndexer bounds and `min_periods = window`.
-pub(crate) fn rolling_mean(values: &[f64], window: usize) -> Vec<f64> {
-    let n = values.len();
-    let mut output = vec![f64::NAN; n];
-    if n == 0 {
-        return output;
-    }
-    let values = prep_values(values);
-    let minp = window;
-    // Fixed monotonic windows: always true for FixedWindowIndexer.
-    let is_monotonic_increasing_bounds = true;
+/// Streaming state for rolling mean over a fixed window.
+#[derive(Debug, Clone)]
+pub(crate) struct RollingMeanState {
+    window: usize,
+    min_periods: usize,
+    buffer: Vec<f64>,
+    head: usize,
+    count: usize,
+    compensation_add: f64,
+    compensation_remove: f64,
+    sum_x: f64,
+    nobs: usize,
+    neg_ct: usize,
+    prev_value: f64,
+    num_consecutive_same_value: i64,
+}
 
-    let mut compensation_add = 0.0;
-    let mut compensation_remove = 0.0;
-    let mut sum_x = 0.0;
-    let mut nobs: usize = 0;
-    let mut neg_ct: usize = 0;
-    let mut prev_value = 0.0;
-    let mut num_consecutive_same_value: i64 = 0;
-    let mut prev_start = 0usize;
-    let mut prev_end = 0usize;
-
-    for i in 0..n {
-        let (s, e) = fixed_bounds(i, window);
-
-        if i == 0 || !is_monotonic_increasing_bounds || s >= prev_end {
-            compensation_add = 0.0;
-            compensation_remove = 0.0;
-            sum_x = 0.0;
-            nobs = 0;
-            neg_ct = 0;
-            // Guard values[s] when the window is empty (window 0) or s is past the end.
-            prev_value = if s < e && s < values.len() {
-                values[s]
+impl RollingMeanState {
+    pub(crate) fn new(window: usize, min_periods: usize) -> Self {
+        Self {
+            window,
+            min_periods,
+            buffer: if window > 0 {
+                vec![f64::NAN; window]
             } else {
-                0.0
-            };
-            num_consecutive_same_value = 0;
-            for j in s..e {
-                add_mean(
-                    values[j],
-                    &mut nobs,
-                    &mut sum_x,
-                    &mut neg_ct,
-                    &mut compensation_add,
-                    &mut num_consecutive_same_value,
-                    &mut prev_value,
-                );
-            }
-        } else {
-            for j in prev_start..s {
-                remove_mean(
-                    values[j],
-                    &mut nobs,
-                    &mut sum_x,
-                    &mut neg_ct,
-                    &mut compensation_remove,
-                );
-            }
-            for j in prev_end..e {
-                add_mean(
-                    values[j],
-                    &mut nobs,
-                    &mut sum_x,
-                    &mut neg_ct,
-                    &mut compensation_add,
-                    &mut num_consecutive_same_value,
-                    &mut prev_value,
-                );
-            }
+                Vec::new()
+            },
+            head: 0,
+            count: 0,
+            compensation_add: 0.0,
+            compensation_remove: 0.0,
+            sum_x: 0.0,
+            nobs: 0,
+            neg_ct: 0,
+            prev_value: 0.0,
+            num_consecutive_same_value: 0,
+        }
+    }
+
+    pub(crate) fn reset(&mut self) {
+        if self.window > 0 {
+            self.buffer.fill(f64::NAN);
+        }
+        self.head = 0;
+        self.count = 0;
+        self.compensation_add = 0.0;
+        self.compensation_remove = 0.0;
+        self.sum_x = 0.0;
+        self.nobs = 0;
+        self.neg_ct = 0;
+        self.prev_value = 0.0;
+        self.num_consecutive_same_value = 0;
+    }
+
+    pub(crate) fn push(&mut self, val: f64) -> f64 {
+        let val = if window_missing(val) { f64::NAN } else { val };
+        if self.window == 0 {
+            return f64::NAN;
+        }
+        if self.window == 1 {
+            self.compensation_add = 0.0;
+            self.compensation_remove = 0.0;
+            self.sum_x = 0.0;
+            self.nobs = 0;
+            self.neg_ct = 0;
+            self.prev_value = val;
+            self.num_consecutive_same_value = 0;
+            add_mean(
+                val,
+                &mut self.nobs,
+                &mut self.sum_x,
+                &mut self.neg_ct,
+                &mut self.compensation_add,
+                &mut self.num_consecutive_same_value,
+                &mut self.prev_value,
+            );
+            return calc_mean(
+                self.min_periods,
+                self.nobs,
+                self.neg_ct,
+                self.sum_x,
+                self.num_consecutive_same_value,
+                self.prev_value,
+            );
         }
 
-        output[i] = calc_mean(
-            minp,
-            nobs,
-            neg_ct,
-            sum_x,
-            num_consecutive_same_value,
-            prev_value,
+        if self.count >= self.window {
+            let old_val = self.buffer[self.head];
+            remove_mean(
+                old_val,
+                &mut self.nobs,
+                &mut self.sum_x,
+                &mut self.neg_ct,
+                &mut self.compensation_remove,
+            );
+        }
+
+        if self.count == 0 {
+            self.prev_value = val;
+            self.num_consecutive_same_value = 0;
+        }
+
+        add_mean(
+            val,
+            &mut self.nobs,
+            &mut self.sum_x,
+            &mut self.neg_ct,
+            &mut self.compensation_add,
+            &mut self.num_consecutive_same_value,
+            &mut self.prev_value,
         );
 
-        if !is_monotonic_increasing_bounds {
-            nobs = 0;
-            neg_ct = 0;
-            sum_x = 0.0;
-            compensation_remove = 0.0;
-        }
+        self.buffer[self.head] = val;
+        self.head = (self.head + 1) % self.window;
+        self.count = self.count.saturating_add(1);
 
-        prev_start = s;
-        prev_end = e;
+        calc_mean(
+            self.min_periods,
+            self.nobs,
+            self.neg_ct,
+            self.sum_x,
+            self.num_consecutive_same_value,
+            self.prev_value,
+        )
     }
+}
 
+/// Pandas `roll_mean` with FixedWindowIndexer bounds and `min_periods = window`.
+pub(crate) fn rolling_mean(values: &[f64], window: usize) -> Vec<f64> {
+    let mut state = RollingMeanState::new(window, window);
+    let mut output = Vec::with_capacity(values.len());
+    for &val in values {
+        output.push(state.push(val));
+    }
     output
 }
 
@@ -264,87 +306,126 @@ fn remove_var(
     }
 }
 
+/// Streaming state for rolling variance over a fixed window.
+#[derive(Debug, Clone)]
+pub(crate) struct RollingVarState {
+    window: usize,
+    min_periods: usize,
+    ddof: i32,
+    buffer: Vec<f64>,
+    head: usize,
+    count: usize,
+    mean_x: f64,
+    ssqdm_x: f64,
+    nobs: f64,
+    compensation_add: f64,
+    compensation_remove: f64,
+}
+
+impl RollingVarState {
+    pub(crate) fn new(window: usize, min_periods: usize, ddof: i32) -> Self {
+        Self {
+            window,
+            min_periods,
+            ddof,
+            buffer: if window > 0 {
+                vec![f64::NAN; window]
+            } else {
+                Vec::new()
+            },
+            head: 0,
+            count: 0,
+            mean_x: 0.0,
+            ssqdm_x: 0.0,
+            nobs: 0.0,
+            compensation_add: 0.0,
+            compensation_remove: 0.0,
+        }
+    }
+
+    pub(crate) fn reset(&mut self) {
+        if self.window > 0 {
+            self.buffer.fill(f64::NAN);
+        }
+        self.head = 0;
+        self.count = 0;
+        self.mean_x = 0.0;
+        self.ssqdm_x = 0.0;
+        self.nobs = 0.0;
+        self.compensation_add = 0.0;
+        self.compensation_remove = 0.0;
+    }
+
+    pub(crate) fn push(&mut self, val: f64) -> f64 {
+        let val = if window_missing(val) { f64::NAN } else { val };
+        if self.window == 0 {
+            return f64::NAN;
+        }
+
+        let mut numerically_unstable = false;
+
+        if self.count >= self.window {
+            let old_val = self.buffer[self.head];
+            remove_var(
+                old_val,
+                &mut self.nobs,
+                &mut self.mean_x,
+                &mut self.ssqdm_x,
+                &mut self.compensation_remove,
+                &mut numerically_unstable,
+            );
+        }
+
+        add_var(
+            val,
+            &mut self.nobs,
+            &mut self.mean_x,
+            &mut self.ssqdm_x,
+            &mut self.compensation_add,
+            &mut numerically_unstable,
+        );
+
+        self.buffer[self.head] = val;
+        self.head = (self.head + 1) % self.window;
+        self.count = self.count.saturating_add(1);
+
+        if numerically_unstable {
+            self.mean_x = 0.0;
+            self.ssqdm_x = 0.0;
+            self.nobs = 0.0;
+            self.compensation_add = 0.0;
+            self.compensation_remove = 0.0;
+            let mut dummy_unstable = false;
+            let n_items = self.count.min(self.window);
+            let start = if self.count < self.window {
+                0
+            } else {
+                self.head
+            };
+            for k in 0..n_items {
+                let item = self.buffer[(start + k) % self.window];
+                add_var(
+                    item,
+                    &mut self.nobs,
+                    &mut self.mean_x,
+                    &mut self.ssqdm_x,
+                    &mut self.compensation_add,
+                    &mut dummy_unstable,
+                );
+            }
+        }
+
+        calc_var(self.min_periods, self.ddof, self.nobs, self.ssqdm_x)
+    }
+}
+
 /// Pandas `roll_var` with FixedWindowIndexer, `ddof = 1`, `min_periods = max(window, 1)`.
 pub(crate) fn rolling_var(values: &[f64], window: usize) -> Vec<f64> {
-    let n = values.len();
-    let mut output = vec![f64::NAN; n];
-    if n == 0 {
-        return output;
+    let mut state = RollingVarState::new(window, window.max(1), 1);
+    let mut output = Vec::with_capacity(values.len());
+    for &val in values {
+        output.push(state.push(val));
     }
-    let values = prep_values(values);
-    let minp = window.max(1);
-    let ddof = 1;
-    let is_monotonic_increasing_bounds = true;
-
-    let mut mean_x = 0.0;
-    let mut ssqdm_x = 0.0;
-    let mut nobs = 0.0;
-    let mut compensation_add = 0.0;
-    let mut compensation_remove = 0.0;
-    let mut numerically_unstable = false;
-    let mut prev_start = 0usize;
-    let mut prev_end = 0usize;
-
-    for i in 0..n {
-        let (s, e) = fixed_bounds(i, window);
-
-        let requires_recompute = i == 0 || !is_monotonic_increasing_bounds || s >= prev_end;
-
-        if !requires_recompute {
-            for j in prev_start..s {
-                remove_var(
-                    values[j],
-                    &mut nobs,
-                    &mut mean_x,
-                    &mut ssqdm_x,
-                    &mut compensation_remove,
-                    &mut numerically_unstable,
-                );
-            }
-            for j in prev_end..e {
-                add_var(
-                    values[j],
-                    &mut nobs,
-                    &mut mean_x,
-                    &mut ssqdm_x,
-                    &mut compensation_add,
-                    &mut numerically_unstable,
-                );
-            }
-        }
-
-        if requires_recompute || numerically_unstable {
-            mean_x = 0.0;
-            ssqdm_x = 0.0;
-            nobs = 0.0;
-            compensation_add = 0.0;
-            compensation_remove = 0.0;
-            for j in s..e {
-                add_var(
-                    values[j],
-                    &mut nobs,
-                    &mut mean_x,
-                    &mut ssqdm_x,
-                    &mut compensation_add,
-                    &mut numerically_unstable,
-                );
-            }
-            numerically_unstable = false;
-        }
-
-        output[i] = calc_var(minp, ddof, nobs, ssqdm_x);
-
-        if !is_monotonic_increasing_bounds {
-            nobs = 0.0;
-            mean_x = 0.0;
-            ssqdm_x = 0.0;
-            compensation_remove = 0.0;
-        }
-
-        prev_start = s;
-        prev_end = e;
-    }
-
     output
 }
 
@@ -425,61 +506,82 @@ pub(crate) fn rolling_min(values: &[f64], window: usize) -> Vec<f64> {
     rolling_min_max(values, window, false)
 }
 
+/// Streaming state for exponential weighted moving average (adjust=False).
+#[derive(Debug, Clone)]
+pub(crate) struct EwmMeanState {
+    com: f64,
+    min_periods: usize,
+    alpha: f64,
+    old_wt_factor: f64,
+    new_wt: f64,
+    weighted: f64,
+    nobs: usize,
+    old_wt: f64,
+}
+
+impl EwmMeanState {
+    pub(crate) fn new(com: f64, min_periods: usize) -> Self {
+        let alpha = 1.0 / (1.0 + com);
+        let old_wt_factor = 1.0 - alpha;
+        let new_wt = alpha;
+        Self {
+            com,
+            min_periods,
+            alpha,
+            old_wt_factor,
+            new_wt,
+            weighted: f64::NAN,
+            nobs: 0,
+            old_wt: 1.0,
+        }
+    }
+
+    pub(crate) fn reset(&mut self) {
+        self.new_wt = self.alpha;
+        self.weighted = f64::NAN;
+        self.nobs = 0;
+        self.old_wt = 1.0;
+    }
+
+    pub(crate) fn push(&mut self, val: f64) -> f64 {
+        let cur = if window_missing(val) { f64::NAN } else { val };
+        let is_observation = ieee_eq(cur, cur);
+        self.nobs += usize::from(is_observation);
+
+        if ieee_eq(self.weighted, self.weighted) {
+            // ignore_na=False ⇒ always enter (decay even on missing).
+            self.old_wt *= self.old_wt_factor;
+            if is_observation {
+                // avoid numerical errors on constant series
+                if !ieee_eq(self.weighted, cur) {
+                    if ieee_eq(self.com, 1.0) {
+                        self.new_wt = 1.0 - self.old_wt;
+                    }
+                    self.weighted = ewm_fuse_update(self.old_wt, self.weighted, self.new_wt, cur);
+                }
+                // adjust=False
+                self.old_wt = 1.0;
+            }
+        } else if is_observation {
+            self.weighted = cur;
+        }
+
+        if self.nobs >= self.min_periods {
+            self.weighted
+        } else {
+            f64::NAN
+        }
+    }
+}
+
 /// Pandas `aggregations.ewm` with `adjust=False`, `ignore_na=False`, `normalize=True`,
 /// over a single full-series window. Does **not** raise `min_periods` to 1 (unlike `roll_var`).
 pub(crate) fn ewm_mean(values: &[f64], com: f64, min_periods: usize) -> Vec<f64> {
-    let n = values.len();
-    let mut output = vec![f64::NAN; n];
-    if n == 0 {
-        return output;
+    let mut state = EwmMeanState::new(com, min_periods);
+    let mut output = Vec::with_capacity(values.len());
+    for &val in values {
+        output.push(state.push(val));
     }
-    let values = prep_values(values);
-
-    let alpha = 1.0 / (1.0 + com);
-    let old_wt_factor = 1.0 - alpha;
-    // adjust=False → new_wt starts as alpha (may be overwritten when com == 1).
-    let mut new_wt = alpha;
-
-    let mut weighted = values[0];
-    let mut is_observation = ieee_eq(weighted, weighted);
-    let mut nobs: usize = usize::from(is_observation);
-    output[0] = if nobs >= min_periods {
-        weighted
-    } else {
-        f64::NAN
-    };
-    let mut old_wt = 1.0;
-
-    for i in 1..n {
-        let cur = values[i];
-        is_observation = ieee_eq(cur, cur);
-        nobs += usize::from(is_observation);
-
-        if ieee_eq(weighted, weighted) {
-            // ignore_na=False ⇒ always enter (decay even on missing).
-            old_wt *= old_wt_factor;
-            if is_observation {
-                // avoid numerical errors on constant series
-                if !ieee_eq(weighted, cur) {
-                    if ieee_eq(com, 1.0) {
-                        new_wt = 1.0 - old_wt;
-                    }
-                    weighted = ewm_fuse_update(old_wt, weighted, new_wt, cur);
-                }
-                // adjust=False
-                old_wt = 1.0;
-            }
-        } else if is_observation {
-            weighted = cur;
-        }
-
-        output[i] = if nobs >= min_periods {
-            weighted
-        } else {
-            f64::NAN
-        };
-    }
-
     output
 }
 
