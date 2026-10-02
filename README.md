@@ -10,13 +10,34 @@ Neither host embeds computational semantics; all deterministic logic lives in Ru
 
 ---
 
+## Tape Volume Analysis
+
+`q_indicators::volume` provides incremental and batch trade-volume analysis through
+`VolumeState` and `batch_volume`. Callers supply trades in source order, including
+their session key and chart-bar open/close timestamps. The kernel uses the supplied
+price and volume units unchanged; it does not convert units, infer missing source
+coverage, or deduplicate trades. Equal-millisecond trades are processed individually.
+
+Buy and sell classification uses the MQL5 `TICK_FLAG_BUY` and `TICK_FLAG_SELL`
+bits (`1 << 5` and `1 << 6`). Exactly one side bit classifies the trade; both or
+neither means unknown. Delta excludes unknown volume, while classified share reports
+classified volume divided by total volume (`None` when total volume is zero).
+Cumulative delta resets when the caller changes the session key.
+
+Trade rate is trades per second in the open-left, closed-right interval
+`(now_msc - window_ms, now_msc]`. It is unavailable until the caller has supplied
+a full window of continuous observation. Call `advance(now_msc)` to age the window
+when no trades arrive. The rate deque holds at most 100,000 events; exceeding that
+capacity returns `VolumeError::CapacityExceeded` without changing state. To change
+configuration, create a new state and replay the desired input history.
+
 ## Crate Responsibilities
 
 Every responsibility named in §5 of the system architecture is mapped to exactly one crate:
 
 | Crate | Responsibility | Role & Boundary |
 | --- | --- | --- |
-| `q-indicators` | Indicator mathematics | Pure technical indicators, transforms, streaming chart studies, and market context kernels: `realized_vol`, `yang_zhang`, `rsi`, `bollinger_bands`, `macd`, `donchian_channels`, `atr`, `sma`, `ema`, `smma`, `wma`, `hma`, `session_vwap`, `rolling_zscore`, `rolling_rank`, `pct_change`, `clip`, streaming states (`SmaState`, `EmaState`, `BollingerState`, `RsiState`, `AtrState`, `SessionVwapState`), and market context analysis (`ContextState`, `batch_context`). Zero I/O, zero system clock or environment access. |
+| `q-indicators` | Indicator mathematics | Pure technical indicators, transforms, streaming chart studies, and market context kernels: `realized_vol`, `yang_zhang`, `rsi`, `bollinger_bands`, `macd`, `donchian_channels`, `atr`, `sma`, `ema`, `smma`, `wma`, `hma`, `session_vwap`, `rolling_zscore`, `rolling_rank`, `pct_change`, `clip`, streaming states (`SmaState`, `EmaState`, `BollingerState`, `RsiState`, `AtrState`, `SessionVwapState`, `VolumeState`), and market context analysis (`ContextState`, `batch_context`). Zero I/O, zero system clock or environment access. |
 | `q-engine` | Simulation & execution kernels | Candle and tick kernels, fill model, exit-rule state machines, position sizing. Shared identically by backtesting and live evaluation. |
 | `q-buffers` | Columnar memory buffers & contracts | Columnar ring buffers, streaming bar windows, Arrow memory layouts, and vendored contract types (`contracts/`). |
 | `q-io` | Columnar codecs & readers | Parquet and Arrow codecs and byte decoders. Reads explicitly provided files/buffers; never performs filesystem discovery. |
