@@ -16,7 +16,7 @@ Every responsibility named in §5 of the system architecture is mapped to exactl
 
 | Crate | Responsibility | Role & Boundary |
 | --- | --- | --- |
-| `q-indicators` | Indicator mathematics | Pure technical indicators, transforms, and streaming chart studies: `realized_vol`, `yang_zhang`, `rsi`, `bollinger_bands`, `macd`, `donchian_channels`, `atr`, `sma`, `ema`, `smma`, `wma`, `hma`, `session_vwap`, `rolling_zscore`, `rolling_rank`, `pct_change`, `clip`, plus streaming states (`SmaState`, `EmaState`, `BollingerState`, `RsiState`, `AtrState`, `SessionVwapState`). Zero I/O, zero system clock or environment access. |
+| `q-indicators` | Indicator mathematics | Pure technical indicators, transforms, streaming chart studies, and market context kernels: `realized_vol`, `yang_zhang`, `rsi`, `bollinger_bands`, `macd`, `donchian_channels`, `atr`, `sma`, `ema`, `smma`, `wma`, `hma`, `session_vwap`, `rolling_zscore`, `rolling_rank`, `pct_change`, `clip`, streaming states (`SmaState`, `EmaState`, `BollingerState`, `RsiState`, `AtrState`, `SessionVwapState`), and market context analysis (`ContextState`, `batch_context`). Zero I/O, zero system clock or environment access. |
 | `q-engine` | Simulation & execution kernels | Candle and tick kernels, fill model, exit-rule state machines, position sizing. Shared identically by backtesting and live evaluation. |
 | `q-buffers` | Columnar memory buffers & contracts | Columnar ring buffers, streaming bar windows, Arrow memory layouts, and vendored contract types (`contracts/`). |
 | `q-io` | Columnar codecs & readers | Parquet and Arrow codecs and byte decoders. Reads explicitly provided files/buffers; never performs filesystem discovery. |
@@ -55,6 +55,57 @@ q-parity      ───►  (none)
    The shared workspace Clippy configuration denies `std::time::Instant`, `std::time::SystemTime`, `std::time::Instant::now`, `std::time::SystemTime::now`, `std::env::var`, and `std::env::var_os`.
 3. **Floating-Point Comparison**:
    Direct floating-point equality (`==` and `!=`) is denied by `clippy::float_cmp` and `clippy::float_cmp_const`.
+
+---
+
+## Market Context Analysis (`q-indicators::context`)
+
+`q-indicators::context` exposes deterministic, inspectable market-context evaluations by composing streaming price studies (`EmaState`, `RsiState`, `AtrState`, `SmaState`, and `SessionVwapState`). It provides both incremental state evaluation (`ContextState`) and slice evaluation (`batch_context`).
+
+### Defaults (`ContextConfig`)
+
+| Parameter | Default | Validation Rule |
+| --- | --- | --- |
+| `fast_period` | 9 | `1..=1000`, `fast_period < slow_period` |
+| `slow_period` | 21 | `1..=1000` |
+| `rsi_period` | 14 | `1..=1000` |
+| `rsi_lower` / `rsi_upper` | 30.0 / 70.0 | finite, `0 < rsi_lower < rsi_upper < 100` |
+| `atr_period` | 14 | `1..=1000` |
+| `volatility_baseline_period` | 20 | `1..=1000` |
+| `volatility_lower` / `volatility_upper` | 0.8 / 1.2 | finite, `0 < volatility_lower < volatility_upper` |
+| `vwap_extension` | 1.0 (ATR multiples) | finite, `> 0` |
+
+### Category Semantics & Evidence
+
+- **Trend (`TrendReading`)**:
+  - `Upward`: Fast EMA > Slow EMA and both one-bar slopes > 0.
+  - `Downward`: Fast EMA < Slow EMA and both one-bar slopes < 0.
+  - `Balanced`: Fast EMA == Slow EMA and both one-bar slopes == 0.
+  - `Mixed`: All other valid conditions.
+  - Requires 1 prior committed bar for slope; absent ATR leaves `normalized_spread` `None` without invalidating the reading.
+- **Momentum (`MomentumReading`)**:
+  - `LowerZone`: RSI < `rsi_lower`.
+  - `MiddleZone`: `rsi_lower <= RSI <= rsi_upper` (threshold equality is middle).
+  - `UpperZone`: RSI > `rsi_upper`.
+  - Change relative to preceding committed bar is labeled `Rising`, `Falling`, or `Unchanged`.
+- **Volatility (`VolatilityReading`)**:
+  - Ratio = ATR / SMA(ATR, `volatility_baseline_period`).
+  - `Contracting`: Ratio < `volatility_lower`.
+  - `Typical`: `volatility_lower <= Ratio <= volatility_upper` (threshold equality is typical).
+  - `Expanding`: Ratio > `volatility_upper`.
+  - Nonpositive or nonfinite ATR baseline SMA is rejected as `Unavailable` with stated reason.
+- **VWAP (`VwapReading`)**:
+  - Signed distance = (Close - VWAP) / ATR.
+  - Position: `Above`, `Below`, or `At` VWAP (independent of distance availability).
+  - Extension: `Extended` (`|distance| >= vwap_extension`), otherwise `Near`.
+  - Zero ATR leaves distance `None` while position remains available; disabled VWAP or missing volume affects only VWAP status.
+
+### Lifecycle & Invariance
+
+`ContextState` exposes `commit`, non-mutating `preview`, and `reset`:
+- **Preview Equivalence**: `preview(input)` on state $S$ produces bitwise identical readings to `commit(input)` on state $S$.
+- **Repeated Preview Invariance**: Repeated provisional updates never mutate internal state or induce preview drift.
+- **Input Isolation**: Invalid config or malformed input is rejected prior to state advancement, preserving existing state bitwise.
 
 ---
 
