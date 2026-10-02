@@ -19,11 +19,11 @@
 
 ## Ordered implementation
 
-- [ ] 1. Add crates/q-indicators/tests/volume_analysis.rs with hand-computed buy/sell/unknown, session reset, rate-boundary and threshold-equality fixtures; include identical timestamp multiplicity.
-- [ ] 2. Implement crates/q-indicators/src/volume.rs and public types/exports. Compose batch processing from VolumeState; keep clock/session/coverage policy outside the crate.
-- [ ] 3. Add prefix parity, double-run determinism, rejected-input state preservation and event-capacity tests. Use explicit checkpoints to test no-trade window ageing.
-- [ ] 4. Document volume semantics, units supplied by callers and bounded-memory errors in README.md. Run cargo test -p q-indicators --test volume_analysis and make check; commit.
-- [ ] 5. Hand off the public API and test outputs. Request normal human integration/release through ./work finish; Q-082 must pin that published tag.
+- [x] 1. Add crates/q-indicators/tests/volume_analysis.rs with hand-computed buy/sell/unknown, session reset, rate-boundary and threshold-equality fixtures; include identical timestamp multiplicity.
+- [x] 2. Implement crates/q-indicators/src/volume.rs and public types/exports. Compose batch processing from VolumeState; keep clock/session/coverage policy outside the crate.
+- [x] 3. Add prefix parity, double-run determinism, rejected-input state preservation and event-capacity tests. Use explicit checkpoints to test no-trade window ageing.
+- [x] 4. Document volume semantics, units supplied by callers and bounded-memory errors in README.md. Run cargo test -p q-indicators --test volume_analysis and make check; commit.
+- [x] 5. Hand off the public API and test outputs. Request normal human integration/release through ./work finish; Q-082 must pin that published tag.
 
 ## Review focus
 
