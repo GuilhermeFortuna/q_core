@@ -14,6 +14,9 @@ mod transforms;
 pub mod volume;
 mod window;
 
+pub mod context;
+
+pub use context::*;
 pub use error::IndicatorError;
 pub use indicators::*;
 pub use moving_averages::*;
