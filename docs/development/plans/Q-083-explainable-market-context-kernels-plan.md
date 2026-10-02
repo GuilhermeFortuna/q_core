@@ -19,10 +19,10 @@
 
 ## Ordered implementation
 
-- [ ] 1. Add crates/q-indicators/tests/context_analysis.rs with typed category/evidence fixtures, exact threshold boundaries, flat/mixed trends, warm-up, unavailable VWAP and session reset.
-- [ ] 2. Implement context.rs by composing the existing streaming states; separate pure classification of evidence from state advancement. Export the spec’s ContextConfig/Input/State/Output and reading types.
-- [ ] 3. Add batch_context driving commit, non-mutating preview and reset. Exercise every fixture prefix, repeated forming previews, invalid-config state preservation and causality/determinism helpers.
-- [ ] 4. Document defaults, evidence and category semantics in README.md. Run cargo test -p q-indicators --test context_analysis and make check; commit.
+- [x] 1. Add crates/q-indicators/tests/context_analysis.rs with typed category/evidence fixtures, exact threshold boundaries, flat/mixed trends, warm-up, unavailable VWAP and session reset.
+- [x] 2. Implement context.rs by composing the existing streaming states; separate pure classification of evidence from state advancement. Export the spec’s ContextConfig/Input/State/Output and reading types.
+- [x] 3. Add batch_context driving commit, non-mutating preview and reset. Exercise every fixture prefix, repeated forming previews, invalid-config state preservation and causality/determinism helpers.
+- [x] 4. Document defaults, evidence and category semantics in README.md. Run cargo test -p q-indicators --test context_analysis and make check; commit.
 - [ ] 5. Hand off API and fixture outputs for normal human integration/release. Q-084 uses a published tag containing both Q-081 and Q-083; if Q-081 lands later, use that later release.
 
 ## Review focus
