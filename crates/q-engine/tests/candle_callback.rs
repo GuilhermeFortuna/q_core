@@ -55,6 +55,7 @@ fn callback_sees_filled_positions_and_preserves_static_results() {
             exit_long: close[bar],
             exit_short: close[bar],
             strength: strength[bar],
+            levels: None,
         })
     })
     .unwrap();

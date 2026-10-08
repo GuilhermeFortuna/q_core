@@ -6,6 +6,9 @@ pub struct BarSignals {
     pub exit_long: bool,
     pub exit_short: bool,
     pub strength: f64,
+    /// Stop and target for an entry queued on this bar, `NaN` where unset. `None` keeps the
+    /// static protective columns.
+    pub levels: Option<(f64, f64)>,
 }
 
 impl BarSignals {
@@ -15,6 +18,7 @@ impl BarSignals {
             exit_long: signals.exit_long[bar],
             exit_short: signals.exit_short[bar],
             strength: signals.strength[bar],
+            levels: None,
         }
     }
 }

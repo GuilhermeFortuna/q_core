@@ -11,7 +11,8 @@ pub use decision::{Decision, DecisionStep, QueuedEntry, QueuedExit, TradeView};
 pub use inputs::{BarSignals, CandleInputs, SignalColumns};
 pub use protective::{IntrabarPrices, IntrabarSource, ProtectiveColumns, RejectedEntries};
 pub use run::{
-    run_candle, run_candle_with_callback, CandleRun, DecisionTrace, ExitReason, PositionSnapshot,
-    TradeLedger,
+    run_candle, run_candle_with_callback, run_candle_with_callbacks, CandleRun, DecisionTrace,
+    ExitCallbacks, ExitReason, ExitScreenFn, ExitTickFn, PositionSnapshot, RuntimeCallbacks,
+    StrategyFn, TradeLedger,
 };
 pub use sizing::Sizing;

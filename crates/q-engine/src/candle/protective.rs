@@ -53,15 +53,6 @@ impl RejectedEntries {
     }
 }
 
-/// A level that a bar's prices reached: the exit reason, its fill price and the time of the
-/// price that reached it.
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub(crate) struct Trigger {
-    pub(crate) reason: ExitReason,
-    pub(crate) price: f64,
-    pub(crate) time_us: i64,
-}
-
 /// One trade's stop and target. Both are `NaN` where unset.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(crate) struct Levels {
@@ -116,55 +107,32 @@ impl Levels {
         }
     }
 
-    /// Walks `prices` in order and returns the first price that reaches a level. The first price
-    /// is skipped for a trade opened on this bar, since it is that trade's own fill.
-    pub(crate) fn first_trigger(
-        self,
-        side: Side,
-        prices: &IntrabarPrices,
-        skip_first: bool,
-    ) -> Option<Trigger> {
-        let points = prices.time_us.iter().zip(&prices.price);
-        for (&time_us, &price) in points.skip(usize::from(skip_first)) {
-            let (stopped, targeted) = match side {
-                Side::Long => (
-                    is_set(self.stop) && price <= self.stop,
-                    is_set(self.target) && price > self.target,
-                ),
-                Side::Short => (
-                    is_set(self.stop) && price >= self.stop,
-                    is_set(self.target) && price < self.target,
-                ),
-            };
-            if stopped {
-                return Some(Trigger {
-                    reason: ExitReason::StopLoss,
-                    price,
-                    time_us,
-                });
-            }
-            if targeted {
-                return Some(Trigger {
-                    reason: ExitReason::TakeProfit,
-                    price: self.target,
-                    time_us,
-                });
-            }
+    /// The exit a single trade price reaches, with its fill price. A stop fills at the price
+    /// at or beyond it; a target fills at its level once a price trades strictly through it.
+    pub(crate) fn trigger(self, side: Side, price: f64) -> Option<(ExitReason, f64)> {
+        let (stopped, targeted) = match side {
+            Side::Long => (
+                is_set(self.stop) && price <= self.stop,
+                is_set(self.target) && price > self.target,
+            ),
+            Side::Short => (
+                is_set(self.stop) && price >= self.stop,
+                is_set(self.target) && price < self.target,
+            ),
+        };
+        if stopped {
+            Some((ExitReason::StopLoss, price))
+        } else if targeted {
+            Some((ExitReason::TakeProfit, self.target))
+        } else {
+            None
         }
-        None
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    fn prices(points: &[(i64, f64)]) -> IntrabarPrices {
-        IntrabarPrices {
-            time_us: points.iter().map(|point| point.0).collect(),
-            price: points.iter().map(|point| point.1).collect(),
-        }
-    }
 
     fn long(stop: f64, target: f64) -> Levels {
         Levels { stop, target }
@@ -190,33 +158,42 @@ mod tests {
     }
 
     #[test]
-    fn the_walk_stops_at_a_price_equal_to_the_stop_and_not_at_one_equal_to_the_target() {
-        let points = prices(&[(1, 96.0), (2, 95.0), (3, 94.0)]);
-        let hit = long(95.0, f64::NAN)
-            .first_trigger(Side::Long, &points, false)
-            .unwrap();
-        assert_eq!(hit.price.to_bits(), 95.0_f64.to_bits());
-        assert_eq!(hit.time_us, 2);
-
-        let points = prices(&[(1, 110.0), (2, 111.0)]);
-        let hit = long(f64::NAN, 110.0)
-            .first_trigger(Side::Long, &points, false)
-            .unwrap();
-        assert_eq!(hit.reason, ExitReason::TakeProfit);
-        assert_eq!(hit.price.to_bits(), 110.0_f64.to_bits());
-        assert_eq!(hit.time_us, 2);
+    fn a_stop_fills_at_the_first_price_at_or_beyond_it() {
+        assert_eq!(
+            long(95.0, f64::NAN).trigger(Side::Long, 95.0),
+            Some((ExitReason::StopLoss, 95.0))
+        );
+        assert_eq!(
+            long(95.0, f64::NAN).trigger(Side::Long, 94.0),
+            Some((ExitReason::StopLoss, 94.0))
+        );
+        assert_eq!(long(95.0, f64::NAN).trigger(Side::Long, 96.0), None);
     }
 
     #[test]
-    fn the_entry_bar_skip_ignores_only_the_first_price() {
-        let points = prices(&[(1, 99.0), (2, 99.5)]);
+    fn a_target_fills_at_its_level_only_when_a_price_trades_strictly_beyond_it() {
+        assert_eq!(long(f64::NAN, 110.0).trigger(Side::Long, 110.0), None);
         assert_eq!(
-            long(99.0, f64::NAN).first_trigger(Side::Long, &points, true),
-            None
+            long(f64::NAN, 110.0).trigger(Side::Long, 111.0),
+            Some((ExitReason::TakeProfit, 110.0))
         );
-        assert!(long(99.0, f64::NAN)
-            .first_trigger(Side::Long, &points, false)
-            .is_some());
+    }
+
+    #[test]
+    fn a_short_stop_and_target_mirror_the_long_comparisons() {
+        let levels = Levels {
+            stop: 105.0,
+            target: 90.0,
+        };
+        assert_eq!(
+            levels.trigger(Side::Short, 105.0),
+            Some((ExitReason::StopLoss, 105.0))
+        );
+        assert_eq!(levels.trigger(Side::Short, 90.0), None);
+        assert_eq!(
+            levels.trigger(Side::Short, 89.0),
+            Some((ExitReason::TakeProfit, 90.0))
+        );
     }
 
     #[test]
