@@ -3,7 +3,7 @@
 use crate::exits::{ExitInputs, ExitRuleId, ExitRuleSet, PositionKey, Side};
 
 use super::decision::{Decision, DecisionStep, QueuedEntry, TradeView};
-use super::inputs::CandleInputs;
+use super::inputs::{BarSignals, CandleInputs};
 use super::protective::{Levels, RejectedEntries};
 use super::{side_cost, CandleConfig, CandleError};
 
@@ -164,31 +164,102 @@ fn time_of_day(time_us: i64) -> i64 {
     time_us.rem_euclid(US_PER_DAY)
 }
 
+/// Immutable view of a filled trade at the strategy decision boundary.
+#[derive(Clone, Copy, Debug)]
+pub struct PositionSnapshot {
+    pub key: PositionKey,
+    pub side: Side,
+    pub entry_bar: usize,
+    pub entry_price: f64,
+    pub quantity: f64,
+}
+
+type StrategyCallback<'a, E> = dyn FnMut(usize, &[PositionSnapshot]) -> Result<BarSignals, E> + 'a;
+
 pub fn run_candle(
     inputs: &CandleInputs<'_>,
     config: &CandleConfig,
 ) -> Result<CandleRun, CandleError> {
-    validate(inputs, config)?;
+    run_with_strategy(inputs, config, None)
+}
 
-    // The exit rules read a close column. A series without one evaluates them at its fill
-    // prices, which is what the backend's `row.get("close", ...)` fallbacks resolve to. The
-    // fallback is owned here so that it outlives the `ExitInputs` borrowing it.
+/// Run the authoritative simulation with fallible decisions from the host.
+/// Callback errors abort immediately; fills and rule decisions remain owned by Rust.
+pub fn run_candle_with_callback<E, F>(
+    inputs: &CandleInputs<'_>,
+    config: &CandleConfig,
+    mut callback: F,
+) -> Result<CandleRun, E>
+where
+    E: From<CandleError>,
+    F: FnMut(usize, &[PositionSnapshot]) -> Result<BarSignals, E>,
+{
+    run_with_strategy(inputs, config, Some(&mut callback))
+}
+
+fn run_with_strategy<E: From<CandleError>>(
+    inputs: &CandleInputs<'_>,
+    config: &CandleConfig,
+    callback: Option<&mut StrategyCallback<'_, E>>,
+) -> Result<CandleRun, E> {
+    validate(inputs, config)?;
     match inputs.close {
-        Some(close) => run_bars(inputs, config, close),
+        Some(close) => run_bars(inputs, config, close, callback),
         None => {
             let fill_prices: Vec<f64> = (0..inputs.time_us.len())
                 .map(|bar| fill_price(inputs, bar))
                 .collect();
-            run_bars(inputs, config, &fill_prices)
+            run_bars(inputs, config, &fill_prices, callback)
         }
     }
 }
 
-fn run_bars<'a, 'c>(
+fn strategy_signals<E: From<CandleError>>(
+    callback: &mut Option<&mut StrategyCallback<'_, E>>,
+    bar: usize,
+    trades: &[Trade],
+) -> Result<Option<BarSignals>, E> {
+    let Some(callback) = callback.as_mut() else {
+        return Ok(None);
+    };
+    let positions: Vec<_> = trades
+        .iter()
+        .enumerate()
+        .filter(|(_, trade)| trade.open)
+        .map(|(ordinal, trade)| PositionSnapshot {
+            key: PositionKey(ordinal as u64),
+            side: trade.side,
+            entry_bar: trade.entry_bar,
+            entry_price: trade.entry_price,
+            quantity: trade.quantity,
+        })
+        .collect();
+    let signals = callback(bar, &positions)?;
+    if !(-1..=1).contains(&signals.entry) {
+        return Err(CandleError::InvalidSignal {
+            column: "entry",
+            bar,
+            reason: "must be -1, 0 or 1",
+        }
+        .into());
+    }
+    if !signals.strength.is_finite() || !(0.0..=1.0).contains(&signals.strength) {
+        return Err(CandleError::InvalidSignal {
+            column: "strength",
+            bar,
+            reason: "must be finite and in [0, 1]",
+        }
+        .into());
+    }
+    Ok(Some(signals))
+}
+
+fn run_bars<'a, 'c, E: From<CandleError>>(
     inputs: &CandleInputs<'a>,
     config: &CandleConfig,
     close_for_exits: &'c [f64],
-) -> Result<CandleRun, CandleError>
+    mut callback: Option<&mut StrategyCallback<'_, E>>,
+) -> Result<CandleRun, E>
 where
     'a: 'c,
 {
@@ -244,6 +315,7 @@ where
                     &mut capital,
                 );
                 queued = Decision::default();
+                strategy_signals(&mut callback, bar, &trades)?;
             } else {
                 // B. The first queued close takes out every open trade under its own reason;
                 // the Python loop's later closes find nothing open on the symbol.
@@ -274,6 +346,8 @@ where
                 // Intrabar stops and targets fill inside this bar, ahead of section D.
                 protective_fills(&mut trades, bar, inputs, config, &mut capital)?;
 
+                let runtime_signals = strategy_signals(&mut callback, bar, &trades)?;
+
                 // D. Evaluate this now-closed bar and queue for the next one.
                 decided = evaluate_bar(
                     &mut step,
@@ -284,6 +358,7 @@ where
                     config,
                     now,
                     last_bar_of_day,
+                    runtime_signals,
                 );
                 queued = decided.clone();
                 // The levels are read from this bar only when it queues an entry.
@@ -308,6 +383,8 @@ where
                     queued = Decision::default();
                 }
             }
+        } else {
+            strategy_signals(&mut callback, bar, &trades)?;
         }
 
         for exit in &decided.exits {
@@ -472,16 +549,33 @@ fn evaluate_bar(
     config: &CandleConfig,
     now: i64,
     last_bar_of_day: bool,
+    runtime_signals: Option<BarSignals>,
 ) -> Decision {
     let Some(window) = config.day_trade else {
-        return decide(step, bar, trades, inputs, exit_inputs, config);
+        return decide(
+            step,
+            bar,
+            trades,
+            inputs,
+            exit_inputs,
+            config,
+            runtime_signals,
+        );
     };
 
     if now >= window.force_close_us || last_bar_of_day {
         return Decision::default();
     }
 
-    let mut decision = decide(step, bar, trades, inputs, exit_inputs, config);
+    let mut decision = decide(
+        step,
+        bar,
+        trades,
+        inputs,
+        exit_inputs,
+        config,
+        runtime_signals,
+    );
     if now < window.entry_start_us || now > window.entry_end_us {
         decision.entry = None;
     }
@@ -495,6 +589,7 @@ fn decide(
     inputs: &CandleInputs<'_>,
     exit_inputs: &ExitInputs<'_>,
     config: &CandleConfig,
+    runtime_signals: Option<BarSignals>,
 ) -> Decision {
     // A trade's key is its ordinal in the ledger, which never moves: the vector is append-only.
     let open: Vec<TradeView> = trades
@@ -508,10 +603,11 @@ fn decide(
             entry_bar: Some(trade.entry_bar),
         })
         .collect();
-    step.decide(
+    step.decide_bar(
         bar,
         &open,
-        &inputs.signals,
+        runtime_signals.unwrap_or_else(|| BarSignals::at(&inputs.signals, bar)),
+        inputs.signals.bar_index,
         exit_inputs,
         config.holding_period_bars,
     )

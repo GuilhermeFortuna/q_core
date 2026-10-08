@@ -5,7 +5,7 @@ use crate::exits::{
     RuleState, Side,
 };
 
-use super::inputs::SignalColumns;
+use super::inputs::{BarSignals, SignalColumns};
 
 /// One open trade as the decision step reads it.
 #[derive(Clone, Copy, Debug)]
@@ -70,6 +70,30 @@ impl DecisionStep {
         exits: &ExitInputs<'_>,
         holding_period_bars: Option<i64>,
     ) -> Decision {
+        self.decide_bar(
+            bar,
+            trades,
+            BarSignals::at(signals, bar),
+            signals.bar_index,
+            exits,
+            holding_period_bars,
+        )
+    }
+
+    /// Evaluate runtime strategy signals using the same rule and holding semantics.
+    #[allow(
+        clippy::too_many_arguments,
+        reason = "same decision inputs as the columnar entry point"
+    )]
+    pub fn decide_bar(
+        &mut self,
+        bar: usize,
+        trades: &[TradeView],
+        signals: BarSignals,
+        bar_index: Option<&[i64]>,
+        exits: &ExitInputs<'_>,
+        holding_period_bars: Option<i64>,
+    ) -> Decision {
         let positions: Vec<OpenPosition> = trades
             .iter()
             .map(|trade| OpenPosition {
@@ -89,7 +113,7 @@ impl DecisionStep {
             .collect();
         let mut symbol_closed = !queued.is_empty();
 
-        match (holding_period_bars, signals.bar_index) {
+        match (holding_period_bars, bar_index) {
             (Some(holding), Some(bar_index)) => {
                 let current_bar = bar_index[bar];
                 for trade in trades {
@@ -109,8 +133,8 @@ impl DecisionStep {
                 }
             }
             _ => {
-                let exit_long = signals.exit_long[bar];
-                let exit_short = signals.exit_short[bar];
+                let exit_long = signals.exit_long;
+                let exit_short = signals.exit_short;
                 for trade in trades {
                     if symbol_closed {
                         break;
@@ -130,14 +154,14 @@ impl DecisionStep {
             }
         }
 
-        let entry = match signals.entry[bar] {
+        let entry = match signals.entry {
             1 => Some(QueuedEntry {
                 side: Side::Long,
-                strength: signals.strength[bar],
+                strength: signals.strength,
             }),
             -1 => Some(QueuedEntry {
                 side: Side::Short,
-                strength: signals.strength[bar],
+                strength: signals.strength,
             }),
             _ => None,
         };

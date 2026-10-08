@@ -429,6 +429,43 @@ except ValueError as exc:
 else:
     raise AssertionError("expected ValueError for a lone stop_price")
 
+# Runtime decisions must observe fills, preserve exceptions, and own input buffers.
+callback_prices = np.array([100., 101., 102., 103.])
+callback_kwargs = dict(
+    time_us=np.arange(4, dtype=np.int64), open=callback_prices, high=callback_prices,
+    low=callback_prices, close=callback_prices, entry=np.zeros(4, dtype=np.int8),
+    exit_long=np.zeros(4, dtype=bool), exit_short=np.zeros(4, dtype=bool),
+    strength=np.zeros(4), columns={}, initial_capital=1000., point_value=1., costs=None,
+    sizing={"type": "fixed_quantity", "quantity": 2., "scale_by_signal_strength": False},
+    sizing_point_value=1., exit_params={}, force_close_at_end=False,
+)
+seen = []
+def callback(bar, positions):
+    seen.append(positions)
+    callback_prices[:] = -999.  # cannot affect simulation buffers
+    return (1 if bar == 0 else 0, bar == 1, bar == 1, 1. if bar == 0 else 0.)
+run = engine.run_candle(**callback_kwargs, strategy_callback=callback)
+assert seen[0] == ()
+assert seen[1] == ((0, 1, 1, 101., 2.),)
+assert seen[2] == ()
+assert run["entry_price"].tolist() == [101.]
+assert run["exit_price"].tolist() == [102.]
+marker = RuntimeError("callback marker")
+def fail(*args):
+    raise marker
+try:
+    engine.run_candle(**callback_kwargs, strategy_callback=fail)
+except RuntimeError as exc:
+    assert exc is marker
+else:
+    raise AssertionError("callback exception swallowed")
+for decision in [(2, False, False, 0.), (1, False, False, float("nan")), (0, 1, False, 0.), None]:
+    try:
+        engine.run_candle(**callback_kwargs, strategy_callback=lambda *args: decision)
+    except (TypeError, ValueError):
+        pass
+    else:
+        raise AssertionError(f"accepted invalid callback decision: {decision}")
 print("engine projection checks passed")
 """
 

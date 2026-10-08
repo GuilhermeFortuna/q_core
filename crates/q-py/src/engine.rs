@@ -6,20 +6,35 @@ use std::collections::{BTreeMap, BTreeSet};
 use numpy::{PyArray1, PyReadonlyArray1};
 use pyo3::exceptions::{PyTypeError, PyValueError};
 use pyo3::prelude::*;
-use pyo3::types::{PyAnyMethods, PyDict, PyList, PyModule, PyModuleMethods, PyTuple};
+use pyo3::types::{PyAnyMethods, PyBool, PyDict, PyList, PyModule, PyModuleMethods, PyTuple};
 use pyo3::Bound;
 use pyo3::IntoPyObjectExt;
 use q_engine::{
-    resolve_bar_ms as resolve_bar_ms_rs, run_candle as run_candle_kernel,
+    resolve_bar_ms as resolve_bar_ms_rs, run_candle as run_candle_kernel, run_candle_with_callback,
     sample_at_bar_ends as sample_at_bar_ends_rs, simulate_ticks, tick_bars as tick_bars_rs,
-    tick_day_bounds as tick_day_bounds_rs, CandleConfig, CandleError, CandleInputs, Costs,
-    DayTradeWindow, DecisionStep, ExitInputs, ExitParams, ExitRuleId, ExitRuleSet, IntrabarPrices,
-    IntrabarSource, ParamValue, PositionKey, ProtectiveColumns, QueuedEntry, RuleState, Side,
-    SignalColumns, Sizing, TickError, TickInputs, TickSizing, TradeView,
+    tick_day_bounds as tick_day_bounds_rs, BarSignals, CandleConfig, CandleError, CandleInputs,
+    Costs, DayTradeWindow, DecisionStep, ExitInputs, ExitParams, ExitRuleId, ExitRuleSet,
+    IntrabarPrices, IntrabarSource, ParamValue, PositionKey, ProtectiveColumns, QueuedEntry,
+    RuleState, Side, SignalColumns, Sizing, TickError, TickInputs, TickSizing, TradeView,
 };
 
 type I64Array<'py> = Bound<'py, PyArray1<i64>>;
 type I64Pair<'py> = (I64Array<'py>, I64Array<'py>);
+
+enum StrategyRunError {
+    Kernel(CandleError),
+    Python(PyErr),
+}
+impl From<CandleError> for StrategyRunError {
+    fn from(err: CandleError) -> Self {
+        Self::Kernel(err)
+    }
+}
+impl From<PyErr> for StrategyRunError {
+    fn from(err: PyErr) -> Self {
+        Self::Python(err)
+    }
+}
 
 fn dtype_name(obj: &Bound<'_, PyAny>) -> PyResult<String> {
     Ok(obj.getattr("dtype")?.str()?.to_string_lossy().into_owned())
@@ -384,6 +399,7 @@ fn extract_f64<'py>(
     stop_price=None,
     target_price=None,
     intrabar=None,
+    strategy_callback=None,
 ))]
 fn py_run_candle<'py>(
     py: Python<'py>,
@@ -412,6 +428,7 @@ fn py_run_candle<'py>(
     stop_price: Option<&Bound<'py, PyAny>>,
     target_price: Option<&Bound<'py, PyAny>>,
     intrabar: Option<&Bound<'py, PyAny>>,
+    strategy_callback: Option<&Bound<'py, PyAny>>,
 ) -> PyResult<Bound<'py, PyDict>> {
     require_int8("entry", entry)?;
     let entry_arr: PyReadonlyArray1<'py, i8> = entry.extract()?;
@@ -481,13 +498,6 @@ fn py_run_candle<'py>(
             "stop_price and target_price must be passed together",
         ));
     }
-    let protective = match (stop_price, target_price) {
-        (Some(stop_price), Some(target_price)) => Some(ProtectiveColumns {
-            stop_price,
-            target_price,
-        }),
-        _ => None,
-    };
     let source = intrabar.map(|callable| PyIntrabar {
         callable,
         error: RefCell::new(None),
@@ -536,6 +546,79 @@ fn py_run_candle<'py>(
         force_close_at_end,
     };
 
+    // Host code can retain and mutate its numpy arrays; callback runs read owned copies.
+    let owns_buffers = strategy_callback.is_some();
+    let owned_time_us = owns_buffers.then(|| time_us.to_vec());
+    let time_us = owned_time_us.as_deref().unwrap_or(time_us);
+    let owned_entry = owns_buffers.then(|| entry.to_vec());
+    let entry = owned_entry.as_deref().unwrap_or(entry);
+    let owned_exit_long = owns_buffers.then(|| exit_long.to_vec());
+    let exit_long = owned_exit_long.as_deref().unwrap_or(exit_long);
+    let owned_exit_short = owns_buffers.then(|| exit_short.to_vec());
+    let exit_short = owned_exit_short.as_deref().unwrap_or(exit_short);
+    let owned_strength = owns_buffers.then(|| strength.to_vec());
+    let strength = owned_strength.as_deref().unwrap_or(strength);
+    let owned_open = if owns_buffers {
+        open.map(<[_]>::to_vec)
+    } else {
+        None
+    };
+    let open = owned_open.as_deref().or(open);
+    let owned_high = if owns_buffers {
+        high.map(<[_]>::to_vec)
+    } else {
+        None
+    };
+    let high = owned_high.as_deref().or(high);
+    let owned_low = if owns_buffers {
+        low.map(<[_]>::to_vec)
+    } else {
+        None
+    };
+    let low = owned_low.as_deref().or(low);
+    let owned_close = if owns_buffers {
+        close.map(<[_]>::to_vec)
+    } else {
+        None
+    };
+    let close = owned_close.as_deref().or(close);
+    let owned_bar_index = if owns_buffers {
+        bar_index.map(<[_]>::to_vec)
+    } else {
+        None
+    };
+    let bar_index = owned_bar_index.as_deref().or(bar_index);
+    let owned_volatility = if owns_buffers {
+        volatility.map(<[_]>::to_vec)
+    } else {
+        None
+    };
+    let volatility = owned_volatility.as_deref().or(volatility);
+    let owned_tradable_slice = if owns_buffers {
+        tradable_slice.map(<[_]>::to_vec)
+    } else {
+        None
+    };
+    let tradable_slice = owned_tradable_slice.as_deref().or(tradable_slice);
+    let owned_stop_price = if owns_buffers {
+        stop_price.map(<[_]>::to_vec)
+    } else {
+        None
+    };
+    let stop_price = owned_stop_price.as_deref().or(stop_price);
+    let owned_target_price = if owns_buffers {
+        target_price.map(<[_]>::to_vec)
+    } else {
+        None
+    };
+    let target_price = owned_target_price.as_deref().or(target_price);
+    let protective = match (stop_price, target_price) {
+        (Some(stop_price), Some(target_price)) => Some(ProtectiveColumns {
+            stop_price,
+            target_price,
+        }),
+        _ => None,
+    };
     let lookup = |name: &str| named.get(name).map(|v| v.as_slice());
     let inputs = CandleInputs {
         time_us,
@@ -557,16 +640,69 @@ fn py_run_candle<'py>(
         intrabar: source.as_ref().map(|source| source as &dyn IntrabarSource),
     };
 
-    let run = match run_candle_kernel(&inputs, &config) {
-        Ok(run) => run,
-        Err(err) => {
-            // An exception from the callable is re-raised as it was raised, not wrapped.
-            if let Some(raised) = source.and_then(|source| source.error.into_inner()) {
-                return Err(raised);
+    let result = if let Some(callback) = strategy_callback {
+        run_candle_with_callback(&inputs, &config, |bar, positions| {
+            let positions: Vec<_> = positions
+                .iter()
+                .map(|position| {
+                    (
+                        position.key.0,
+                        if matches!(position.side, Side::Long) {
+                            1_i8
+                        } else {
+                            -1_i8
+                        },
+                        position.entry_bar,
+                        position.entry_price,
+                        position.quantity,
+                    )
+                })
+                .collect();
+            let snapshot = PyTuple::new(py, positions)?;
+            let returned = callback.call1((bar, snapshot))?;
+            let tuple = returned.downcast::<PyTuple>().map_err(|_| {
+                PyTypeError::new_err(
+                    "strategy_callback must return (entry, exit_long, exit_short, strength)",
+                )
+            })?;
+            if tuple.len() != 4 {
+                return Err(StrategyRunError::Python(PyTypeError::new_err(
+                    "strategy_callback must return four values",
+                )));
             }
-            return Err(candle_error(err));
-        }
+            let entry = tuple.get_item(0)?;
+            let long = tuple.get_item(1)?;
+            let short = tuple.get_item(2)?;
+            if entry.is_instance_of::<PyBool>()
+                || !long.is_instance_of::<PyBool>()
+                || !short.is_instance_of::<PyBool>()
+            {
+                return Err(StrategyRunError::Python(PyTypeError::new_err(
+                    "strategy_callback requires integer entry and boolean exit flags",
+                )));
+            }
+            Ok(BarSignals {
+                entry: entry.extract()?,
+                exit_long: long.extract()?,
+                exit_short: short.extract()?,
+                strength: tuple.get_item(3)?.extract()?,
+            })
+        })
+    } else {
+        run_candle_kernel(&inputs, &config).map_err(StrategyRunError::Kernel)
     };
+    let run = result.map_err(|err| {
+        if let Some(raised) = source
+            .as_ref()
+            .and_then(|source| source.error.borrow_mut().take())
+        {
+            return raised;
+        }
+        match err {
+            StrategyRunError::Kernel(err) => candle_error(err),
+            StrategyRunError::Python(err) => err,
+        }
+    })?;
     let ledger = &run.trades;
     let trace = &run.trace;
     let rejected = &run.rejected;

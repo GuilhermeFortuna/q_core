@@ -31,6 +31,25 @@ when no trades arrive. The rate deque holds at most 100,000 events; exceeding th
 capacity returns `VolumeError::CapacityExceeded` without changing state. To change
 configuration, create a new state and replay the desired input history.
 
+## Runtime candle strategy decisions
+
+`q_engine::run_candle_with_callback` uses the same simulation loop as `run_candle`.
+Its fallible callback receives a bar index and `PositionSnapshot` values (ledger key,
+side, entry bar, entry price, quantity), after queued fills and intrabar protective
+fills and before current-bar decisions. It returns `BarSignals`; the existing engine
+still applies exit-rule precedence, session gates, sizing, and execution costs.
+Callbacks run once per bar, including suppressed and final bars. Orders remain queued
+until the next open, and end-of-day or terminal closes may happen after the callback.
+
+Python callers may pass `strategy_callback` to `q_core.engine.run_candle`. It receives
+`(bar, positions)`, where positions is a tuple of
+`(ledger_ordinal, side, entry_bar, entry_price, quantity)` tuples (`side` is `1` or `-1`).
+It returns `(entry, exit_long, exit_short, strength)`; entry is `-1`, `0`, or `1`, exit
+flags are booleans, and strength must be finite and within `[0, 1]`. Invalid decisions
+or callback exceptions abort the run. Callback runs own copies of input arrays so
+host mutations cannot change the simulation. Calls without this argument retain the
+static signal path. This native extension requires no contract or Qt API changes.
+
 ## Intrabar Protective Orders (`q-engine::candle`)
 
 `run_candle` can fill an entry's stop and target inside the bar where they trade. Both levels are
