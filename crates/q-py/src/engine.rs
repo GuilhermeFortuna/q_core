@@ -10,12 +10,13 @@ use pyo3::types::{PyAnyMethods, PyBool, PyDict, PyList, PyModule, PyModuleMethod
 use pyo3::Bound;
 use pyo3::IntoPyObjectExt;
 use q_engine::{
-    resolve_bar_ms as resolve_bar_ms_rs, run_candle as run_candle_kernel, run_candle_with_callback,
+    resolve_bar_ms as resolve_bar_ms_rs, run_candle_with_callbacks,
     sample_at_bar_ends as sample_at_bar_ends_rs, simulate_ticks, tick_bars as tick_bars_rs,
     tick_day_bounds as tick_day_bounds_rs, BarSignals, CandleConfig, CandleError, CandleInputs,
-    Costs, DayTradeWindow, DecisionStep, ExitInputs, ExitParams, ExitRuleId, ExitRuleSet,
-    IntrabarPrices, IntrabarSource, ParamValue, PositionKey, ProtectiveColumns, QueuedEntry,
-    RuleState, Side, SignalColumns, Sizing, TickError, TickInputs, TickSizing, TradeView,
+    Costs, DayTradeWindow, DecisionStep, ExitCallbacks, ExitInputs, ExitParams, ExitRuleId,
+    ExitRuleSet, IntrabarPrices, IntrabarSource, ParamValue, PositionKey, PositionSnapshot,
+    ProtectiveColumns, QueuedEntry, RuleState, RuntimeCallbacks, Side, SignalColumns, Sizing,
+    StrategyFn, TickError, TickInputs, TickSizing, TradeView,
 };
 
 type I64Array<'py> = Bound<'py, PyArray1<i64>>;
@@ -400,6 +401,8 @@ fn extract_f64<'py>(
     target_price=None,
     intrabar=None,
     strategy_callback=None,
+    exit_screen_callback=None,
+    exit_tick_callback=None,
 ))]
 fn py_run_candle<'py>(
     py: Python<'py>,
@@ -429,6 +432,8 @@ fn py_run_candle<'py>(
     target_price: Option<&Bound<'py, PyAny>>,
     intrabar: Option<&Bound<'py, PyAny>>,
     strategy_callback: Option<&Bound<'py, PyAny>>,
+    exit_screen_callback: Option<&Bound<'py, PyAny>>,
+    exit_tick_callback: Option<&Bound<'py, PyAny>>,
 ) -> PyResult<Bound<'py, PyDict>> {
     require_int8("entry", entry)?;
     let entry_arr: PyReadonlyArray1<'py, i8> = entry.extract()?;
@@ -546,8 +551,14 @@ fn py_run_candle<'py>(
         force_close_at_end,
     };
 
+    if exit_screen_callback.is_some() != exit_tick_callback.is_some() {
+        return Err(PyValueError::new_err(
+            "exit_screen_callback and exit_tick_callback must be passed together",
+        ));
+    }
+
     // Host code can retain and mutate its numpy arrays; callback runs read owned copies.
-    let owns_buffers = strategy_callback.is_some();
+    let owns_buffers = strategy_callback.is_some() || exit_screen_callback.is_some();
     let owned_time_us = owns_buffers.then(|| time_us.to_vec());
     let time_us = owned_time_us.as_deref().unwrap_or(time_us);
     let owned_entry = owns_buffers.then(|| entry.to_vec());
@@ -640,57 +651,46 @@ fn py_run_candle<'py>(
         intrabar: source.as_ref().map(|source| source as &dyn IntrabarSource),
     };
 
-    let result = if let Some(callback) = strategy_callback {
-        run_candle_with_callback(&inputs, &config, |bar, positions| {
-            let positions: Vec<_> = positions
-                .iter()
-                .map(|position| {
-                    (
-                        position.key.0,
-                        if matches!(position.side, Side::Long) {
-                            1_i8
-                        } else {
-                            -1_i8
-                        },
-                        position.entry_bar,
-                        position.entry_price,
-                        position.quantity,
-                    )
-                })
-                .collect();
-            let snapshot = PyTuple::new(py, positions)?;
+    let mut strategy = strategy_callback.map(|callback| {
+        move |bar: usize, positions: &[PositionSnapshot]| -> Result<BarSignals, StrategyRunError> {
+            let snapshot = position_tuples(py, positions)?;
             let returned = callback.call1((bar, snapshot))?;
-            let tuple = returned.downcast::<PyTuple>().map_err(|_| {
-                PyTypeError::new_err(
-                    "strategy_callback must return (entry, exit_long, exit_short, strength)",
-                )
-            })?;
-            if tuple.len() != 4 {
-                return Err(StrategyRunError::Python(PyTypeError::new_err(
-                    "strategy_callback must return four values",
-                )));
-            }
-            let entry = tuple.get_item(0)?;
-            let long = tuple.get_item(1)?;
-            let short = tuple.get_item(2)?;
-            if entry.is_instance_of::<PyBool>()
-                || !long.is_instance_of::<PyBool>()
-                || !short.is_instance_of::<PyBool>()
-            {
-                return Err(StrategyRunError::Python(PyTypeError::new_err(
-                    "strategy_callback requires integer entry and boolean exit flags",
-                )));
-            }
-            Ok(BarSignals {
-                entry: entry.extract()?,
-                exit_long: long.extract()?,
-                exit_short: short.extract()?,
-                strength: tuple.get_item(3)?.extract()?,
-            })
-        })
-    } else {
-        run_candle_kernel(&inputs, &config).map_err(StrategyRunError::Kernel)
+            strategy_decision(&returned)
+        }
+    });
+    let mut screen = exit_screen_callback.map(|callback| {
+        move |bar: usize, positions: &[PositionSnapshot]| -> Result<bool, StrategyRunError> {
+            let snapshot = position_tuples(py, positions)?;
+            let returned = callback.call1((bar, snapshot))?;
+            exit_flag(&returned, "exit_screen_callback")
+        }
+    });
+    let mut tick = exit_tick_callback.map(|callback| {
+        move |bar: usize,
+              tick: usize,
+              time_us: i64,
+              price: f64,
+              positions: &[PositionSnapshot]|
+              -> Result<bool, StrategyRunError> {
+            let snapshot = position_tuples(py, positions)?;
+            let returned = callback.call1((bar, tick, time_us, price, snapshot))?;
+            exit_flag(&returned, "exit_tick_callback")
+        }
+    });
+    let exit = match (screen.as_mut(), tick.as_mut()) {
+        (Some(screen), Some(tick)) => Some(ExitCallbacks { screen, tick }),
+        _ => None,
     };
+    let result = run_candle_with_callbacks(
+        &inputs,
+        &config,
+        RuntimeCallbacks {
+            strategy: strategy
+                .as_mut()
+                .map(|closure| closure as &mut StrategyFn<'_, StrategyRunError>),
+            exit,
+        },
+    );
     let run = result.map_err(|err| {
         if let Some(raised) = source
             .as_ref()
@@ -776,6 +776,78 @@ fn py_run_candle<'py>(
     )?;
 
     Ok(out)
+}
+
+fn position_tuples<'py>(
+    py: Python<'py>,
+    positions: &[PositionSnapshot],
+) -> PyResult<Bound<'py, PyTuple>> {
+    let positions: Vec<_> = positions
+        .iter()
+        .map(|position| {
+            (
+                position.key.0,
+                if matches!(position.side, Side::Long) {
+                    1_i8
+                } else {
+                    -1_i8
+                },
+                position.entry_bar,
+                position.entry_price,
+                position.quantity,
+            )
+        })
+        .collect();
+    PyTuple::new(py, positions)
+}
+
+/// `(entry, exit_long, exit_short, strength)`, optionally followed by the `(stop_price,
+/// target_price)` of an entry queued on this bar. `NaN` means no level.
+fn strategy_decision(returned: &Bound<'_, PyAny>) -> Result<BarSignals, StrategyRunError> {
+    let tuple = returned.downcast::<PyTuple>().map_err(|_| {
+        StrategyRunError::Python(PyTypeError::new_err(
+            "strategy_callback must return (entry, exit_long, exit_short, strength[, stop_price, target_price])",
+        ))
+    })?;
+    if tuple.len() != 4 && tuple.len() != 6 {
+        return Err(StrategyRunError::Python(PyTypeError::new_err(
+            "strategy_callback must return four or six values",
+        )));
+    }
+    let entry = tuple.get_item(0)?;
+    let long = tuple.get_item(1)?;
+    let short = tuple.get_item(2)?;
+    if entry.is_instance_of::<PyBool>()
+        || !long.is_instance_of::<PyBool>()
+        || !short.is_instance_of::<PyBool>()
+    {
+        return Err(StrategyRunError::Python(PyTypeError::new_err(
+            "strategy_callback requires integer entry and boolean exit flags",
+        )));
+    }
+    let levels = if tuple.len() == 6 {
+        let stop: f64 = tuple.get_item(4)?.extract()?;
+        let target: f64 = tuple.get_item(5)?.extract()?;
+        Some((stop, target))
+    } else {
+        None
+    };
+    Ok(BarSignals {
+        entry: entry.extract()?,
+        exit_long: long.extract()?,
+        exit_short: short.extract()?,
+        strength: tuple.get_item(3)?.extract()?,
+        levels,
+    })
+}
+
+fn exit_flag(returned: &Bound<'_, PyAny>, name: &str) -> Result<bool, StrategyRunError> {
+    if !returned.is_instance_of::<PyBool>() {
+        return Err(StrategyRunError::Python(PyTypeError::new_err(format!(
+            "{name} must return a bool"
+        ))));
+    }
+    Ok(returned.extract::<bool>()?)
 }
 
 /// The Python `intrabar` callable as an [`IntrabarSource`]. It returns `(time_us, price)`

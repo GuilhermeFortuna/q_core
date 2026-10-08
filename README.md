@@ -44,11 +44,25 @@ until the next open, and end-of-day or terminal closes may happen after the call
 Python callers may pass `strategy_callback` to `q_core.engine.run_candle`. It receives
 `(bar, positions)`, where positions is a tuple of
 `(ledger_ordinal, side, entry_bar, entry_price, quantity)` tuples (`side` is `1` or `-1`).
-It returns `(entry, exit_long, exit_short, strength)`; entry is `-1`, `0`, or `1`, exit
-flags are booleans, and strength must be finite and within `[0, 1]`. Invalid decisions
-or callback exceptions abort the run. Callback runs own copies of input arrays so
-host mutations cannot change the simulation. Calls without this argument retain the
-static signal path. This native extension requires no contract or Qt API changes.
+It returns `(entry, exit_long, exit_short, strength)`, or
+`(entry, exit_long, exit_short, strength, stop_price, target_price)` to give an entry queued
+on this bar its own levels (`NaN` means no level; without the two extra values the static
+`stop_price`/`target_price` columns apply). Entry is `-1`, `0`, or `1`, exit flags are booleans,
+strength must be finite and within `[0, 1]`, and levels must be `NaN` or finite and positive.
+Runtime levels need the `intrabar` source, as static ones do. Invalid decisions or callback
+exceptions abort the run. Callback runs own copies of input arrays so host mutations cannot
+change the simulation. Calls without these arguments retain the static signal path. This native
+extension requires no contract or Qt API changes.
+
+Custom intrabar exits are requested with `exit_screen_callback` and `exit_tick_callback`,
+which must be passed together and require `intrabar`. The screen receives
+`(bar, positions)` and returns a bool; it is called once per candle with open positions, after
+queued fills and before intrabar processing, and flat candles are never screened. A `True` screen
+loads that candle's trade prices. The tick receives `(bar, tick, time_us, price, positions)` for
+each price in order and returns a bool; `True` closes every open trade at that traded price,
+except a trade opened on this same tick. A screen is conservative: a false positive costs a
+replay but never fills. Rust callers use `q_engine::run_candle_with_callbacks` with
+`RuntimeCallbacks { strategy, exit }`.
 
 ## Intrabar Protective Orders (`q-engine::candle`)
 
@@ -64,12 +78,15 @@ Between sections C and D of each tradable bar that is not force-closed:
    short needs `stop > fill` and `target < fill`. Only the levels that are set are checked.
 2. **Screen.** A long's stop is reached when `low <= stop` and its target when `high > target`; a
    short's stop when `high >= stop` and its target when `low < target`. The source is called only
-   when some open trade's level passes the screen, and at most once per bar.
-3. **Walk.** The bar's trade prices are walked in order. A stop fills at the first price at or
-   beyond its level, so a bar that opens past the level fills at its open. A target fills at its
-   level once a price trades strictly through it; a price equal to the target does not fill. The
-   first trigger in price order closes the trade with `STOP_LOSS` or `TAKE_PROFIT`. A trade opened
-   on this bar skips its first price, which is its own fill.
+   when some open trade's level passes the screen or the custom exit screen qualifies, and at most
+   once per bar.
+3. **Walk.** The bar's trade prices are walked once, in order. At each price, screened trades are
+   checked for their stop (first, then target) and a stop fills at the traded price, so a bar that
+   opens past the level fills at its open. A target fills at its level once a price trades strictly
+   through it; a price equal to the target does not fill. A trade opened on this bar skips its first
+   price, which is its own fill. A custom tick exit at the same price is evaluated only after the
+   protective checks, so a protective fill takes precedence; the first executable event in price
+   order wins, and the walk stops once no positions remain open.
 4. **Close.** The trade closes at the triggering fill price, charged its exit-side cost, and its
    time is recorded in `exit_time_us`. A screen pass with no triggering price leaves the trade open.
    A source that returns no prices, or fails, ends the run with `CandleError::IntrabarSource` naming

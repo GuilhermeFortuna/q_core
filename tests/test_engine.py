@@ -466,6 +466,82 @@ for decision in [(2, False, False, 0.), (1, False, False, float("nan")), (0, 1, 
         pass
     else:
         raise AssertionError(f"accepted invalid callback decision: {decision}")
+# Custom exits: the screen selects candidates and the tick confirms the first executable price.
+def callback_run(strategy_callback=None, bar_two_low=99., **extra):
+    return engine.run_candle(
+        time_us=np.array([(10 + b) * HOUR for b in range(4)], dtype=np.int64),
+        open=np.array([100., 100., 100., 120.]), high=np.array([100., 100., 106., 120.]),
+        low=np.array([100., 100., bar_two_low, 120.]), close=None,
+        entry=np.array([1, 0, 0, 0], dtype=np.int8), exit_long=np.zeros(4, dtype=bool),
+        exit_short=np.zeros(4, dtype=bool), strength=np.array([1., 0., 0., 0.]), columns={},
+        initial_capital=1000., point_value=1., costs=None,
+        sizing={"type": "fixed_quantity", "quantity": 1., "scale_by_signal_strength": False},
+        sizing_point_value=1., exit_params={}, force_close_at_end=False,
+        strategy_callback=strategy_callback, **extra,
+    )
+calls, screened, ticked = [], [], []
+run = callback_run(
+    intrabar=tape_source({2: [101., 104., 105., 106.]}, calls),
+    exit_screen_callback=lambda bar, positions: screened.append((bar, len(positions))) or bar == 2,
+    exit_tick_callback=lambda bar, tick, time_us, price, positions: ticked.append((bar, tick, price)) or price >= 105.,
+)
+assert run["exit_price"].tolist() == [105.], run["exit_price"]
+assert run["exit_reason_text"] == ["SIGNAL"]
+assert run["exit_time_us"].tolist() == [12 * HOUR + 2 * SECOND]
+assert calls == [2], calls
+assert screened == [(1, 1), (2, 1)], screened
+assert ticked == [(2, 0, 101.), (2, 1, 104.), (2, 2, 105.)], ticked
+
+# Runtime levels: the six-value decision carries the stop, and a stop fills at its traded price.
+calls = []
+def levelled(bar, positions):
+    if bar == 0:
+        return (1, False, False, 1., 95., 110.)
+    return (0, False, False, 0., NAN, NAN)
+run = callback_run(strategy_callback=levelled, bar_two_low=94., intrabar=tape_source({2: [101., 94.]}, calls))
+assert run["exit_reason_text"] == ["STOP_LOSS"], run["exit_reason_text"]
+assert run["exit_price"].tolist() == [94.]
+try:
+    callback_run(strategy_callback=levelled)
+except ValueError as exc:
+    assert "stop_price" in str(exc)
+else:
+    raise AssertionError("runtime levels accepted without an intrabar source")
+try:
+    callback_run(strategy_callback=lambda bar, positions: (0, False, False, 0., -1., NAN),
+                 intrabar=tape_source({}, []))
+except ValueError as exc:
+    assert "stop_price" in str(exc)
+else:
+    raise AssertionError("non-positive runtime level accepted")
+try:
+    callback_run(strategy_callback=lambda bar, positions: (0, False, False, 0., 1., 2., 3.),
+                 intrabar=tape_source({}, []))
+except TypeError as exc:
+    assert "four or six" in str(exc)
+else:
+    raise AssertionError("seven-value decision accepted")
+
+# The exit pair travels together, and each flag must be a bool.
+try:
+    callback_run(exit_screen_callback=lambda *args: True)
+except ValueError as exc:
+    assert "passed together" in str(exc)
+else:
+    raise AssertionError("lone exit_screen_callback accepted")
+try:
+    callback_run(intrabar=tape_source({}, []), exit_screen_callback=lambda *args: 1,
+                 exit_tick_callback=lambda *args: False)
+except TypeError as exc:
+    assert "exit_screen_callback must return a bool" in str(exc)
+else:
+    raise AssertionError("integer screen flag accepted")
+try:
+    callback_run(exit_screen_callback=lambda *args: False, exit_tick_callback=lambda *args: False)
+except ValueError as exc:
+    assert "intrabar" in str(exc) or "exit_screen_callback" in str(exc)
+else:
+    raise AssertionError("exit callbacks accepted without an intrabar source")
 print("engine projection checks passed")
 """
 
