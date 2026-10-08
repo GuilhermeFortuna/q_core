@@ -21,12 +21,14 @@
 
 ## Ordered implementation
 
-- [ ] 1. Add `crates/q-engine/tests/protective_orders_gate.rs` with the hand-computed cases of spec criteria 1 to 9 and a counting test source. Confirm it fails to compile for the expected reason.
-- [ ] 2. Add `crates/q-engine/src/candle/protective.rs`: `ProtectiveColumns`, `IntrabarSource`, `IntrabarPrices`, `RejectedEntries`, the screen and the price walk as pure functions with unit tests for the boundary comparisons (at the level, one step beyond, entry-bar skip).
-- [ ] 3. Extend `candle/inputs.rs`, `candle/config.rs` (`CandleError` variant for a source failure) and `candle/run.rs`: validation, the entry check in `open_entry`, the new step, `ExitReason::StopLoss` and `ExitReason::TakeProfit`, `exit_time_us` in the ledger and `rejected` in `CandleRun`. Update the three `CandleInputs` constructors (`run.rs` tests, `candle_engine_gate.rs`, `q-py/src/engine.rs`) to pass `None`.
-- [ ] 4. Run `cargo test -p q-engine`; confirm the new gate passes and `candle_engine_gate`, `decision_step_gate` and `exit_rules_gate` pass with unchanged bodies. Commit.
-- [ ] 5. Project through `crates/q-py/src/engine.rs`: the three keyword arguments, a source that calls the Python callable and keeps its exception for re-raising, the new result arrays, `exit_reason_text` for codes 14 and 15, and `PROTECTIVE_ORDERS`. Add cases to `tests/test_engine.py` for spec criterion 11.
+- [x] 1. Add `crates/q-engine/tests/protective_orders_gate.rs` with the hand-computed cases of spec criteria 1 to 9 and a counting test source. Confirm it fails to compile for the expected reason.
+- [x] 2. Add `crates/q-engine/src/candle/protective.rs`: `ProtectiveColumns`, `IntrabarSource`, `IntrabarPrices`, `RejectedEntries`, the screen and the price walk as pure functions with unit tests for the boundary comparisons (at the level, one step beyond, entry-bar skip).
+- [x] 3. Extend `candle/inputs.rs`, `candle/config.rs` (`CandleError` variant for a source failure) and `candle/run.rs`: validation, the entry check in `open_entry`, the new step, `ExitReason::StopLoss` and `ExitReason::TakeProfit`, `exit_time_us` in the ledger and `rejected` in `CandleRun`. Update the three `CandleInputs` constructors (`run.rs` tests, `candle_engine_gate.rs`, `q-py/src/engine.rs`) to pass `None`.
+- [x] 4. Run `cargo test -p q-engine`; confirm the new gate passes and `candle_engine_gate`, `decision_step_gate` and `exit_rules_gate` pass with unchanged bodies. Commit.
+- [x] 5. Project through `crates/q-py/src/engine.rs`: the three keyword arguments, a source that calls the Python callable and keeps its exception for re-raising, the new result arrays, `exit_reason_text` for codes 14 and 15, and `PROTECTIVE_ORDERS`. Add cases to `tests/test_engine.py` for spec criterion 11.
 - [ ] 6. Document the fill rule in `README.md`. Run `make bench-candle-kernel` on `development` and on the branch and record both numbers here. Run `make check`. Commit.
+  - [x] README fill rule documented; `make check` passes.
+  - [ ] Benchmark numbers not recorded: `make bench-candle-kernel` fails on `development` and on the branch before measuring. `tests/bench_candle_kernel.py` calls `build_scripted_strategy` with `trailing_stop_pct`, `atr_period` and `stop_loss_atr`, but `tools/reference/families/scripted_strategy.py` takes `exit_params`. After that is fixed, the script runs under a venv without the backend's dependencies (`pydantic`), so the target also needs the backend's locked environment with the wheel installed.
 
 ## Review focus
 

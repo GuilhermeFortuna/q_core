@@ -1,5 +1,6 @@
 //! Python projection of `q-engine` candle and tick kernels onto contiguous numpy arrays.
 
+use std::cell::RefCell;
 use std::collections::{BTreeMap, BTreeSet};
 
 use numpy::{PyArray1, PyReadonlyArray1};
@@ -12,9 +13,9 @@ use q_engine::{
     resolve_bar_ms as resolve_bar_ms_rs, run_candle as run_candle_kernel,
     sample_at_bar_ends as sample_at_bar_ends_rs, simulate_ticks, tick_bars as tick_bars_rs,
     tick_day_bounds as tick_day_bounds_rs, CandleConfig, CandleError, CandleInputs, Costs,
-    DayTradeWindow, DecisionStep, ExitInputs, ExitParams, ExitRuleId, ExitRuleSet, ParamValue,
-    PositionKey, QueuedEntry, RuleState, Side, SignalColumns, Sizing, TickError, TickInputs,
-    TickSizing, TradeView,
+    DayTradeWindow, DecisionStep, ExitInputs, ExitParams, ExitRuleId, ExitRuleSet, IntrabarPrices,
+    IntrabarSource, ParamValue, PositionKey, ProtectiveColumns, QueuedEntry, RuleState, Side,
+    SignalColumns, Sizing, TickError, TickInputs, TickSizing, TradeView,
 };
 
 type I64Array<'py> = Bound<'py, PyArray1<i64>>;
@@ -42,6 +43,9 @@ fn candle_error(err: CandleError) -> PyErr {
             reason,
         } => PyValueError::new_err(format!("{column}[{bar}]: {reason}")),
         CandleError::Exit(e) => PyValueError::new_err(e.to_string()),
+        CandleError::IntrabarSource { bar, reason } => {
+            PyValueError::new_err(format!("intrabar[{bar}]: {reason}"))
+        }
     }
 }
 
@@ -212,6 +216,8 @@ fn exit_reason_text(code: i64) -> Option<&'static str> {
         11 => "SIGNAL",
         12 => "END_OF_DAY",
         13 => "FORCE_CLOSE",
+        14 => "STOP_LOSS",
+        15 => "TAKE_PROFIT",
         _ => return None,
     })
 }
@@ -375,6 +381,9 @@ fn extract_f64<'py>(
     exit_params,
     day_trade_us=None,
     force_close_at_end,
+    stop_price=None,
+    target_price=None,
+    intrabar=None,
 ))]
 fn py_run_candle<'py>(
     py: Python<'py>,
@@ -400,6 +409,9 @@ fn py_run_candle<'py>(
     exit_params: &Bound<'py, PyAny>,
     day_trade_us: Option<(i64, i64, i64)>,
     force_close_at_end: bool,
+    stop_price: Option<&Bound<'py, PyAny>>,
+    target_price: Option<&Bound<'py, PyAny>>,
+    intrabar: Option<&Bound<'py, PyAny>>,
 ) -> PyResult<Bound<'py, PyDict>> {
     require_int8("entry", entry)?;
     let entry_arr: PyReadonlyArray1<'py, i8> = entry.extract()?;
@@ -450,6 +462,36 @@ fn py_run_candle<'py>(
         .as_ref()
         .map(|a| contiguous_f64("volatility", a))
         .transpose()?;
+    let stop_arr = stop_price
+        .map(|obj| extract_f64("stop_price", obj))
+        .transpose()?;
+    let target_arr = target_price
+        .map(|obj| extract_f64("target_price", obj))
+        .transpose()?;
+    let stop_price = stop_arr
+        .as_ref()
+        .map(|a| contiguous_f64("stop_price", a))
+        .transpose()?;
+    let target_price = target_arr
+        .as_ref()
+        .map(|a| contiguous_f64("target_price", a))
+        .transpose()?;
+    if stop_price.is_some() != target_price.is_some() {
+        return Err(PyValueError::new_err(
+            "stop_price and target_price must be passed together",
+        ));
+    }
+    let protective = match (stop_price, target_price) {
+        (Some(stop_price), Some(target_price)) => Some(ProtectiveColumns {
+            stop_price,
+            target_price,
+        }),
+        _ => None,
+    };
+    let source = intrabar.map(|callable| PyIntrabar {
+        callable,
+        error: RefCell::new(None),
+    });
 
     let tradable_arr = tradable
         .map(|arr| {
@@ -511,11 +553,23 @@ fn py_run_candle<'py>(
         volatility,
         tradable: tradable_slice,
         columns: &lookup,
+        protective,
+        intrabar: source.as_ref().map(|source| source as &dyn IntrabarSource),
     };
 
-    let run = run_candle_kernel(&inputs, &config).map_err(candle_error)?;
+    let run = match run_candle_kernel(&inputs, &config) {
+        Ok(run) => run,
+        Err(err) => {
+            // An exception from the callable is re-raised as it was raised, not wrapped.
+            if let Some(raised) = source.and_then(|source| source.error.into_inner()) {
+                return Err(raised);
+            }
+            return Err(candle_error(err));
+        }
+    };
     let ledger = &run.trades;
     let trace = &run.trace;
+    let rejected = &run.rejected;
 
     let out = PyDict::new(py);
     out.set_item(
@@ -549,6 +603,10 @@ fn py_run_candle<'py>(
         .map(|&code| exit_reason_text(code))
         .collect();
     out.set_item("exit_reason_text", texts)?;
+    out.set_item(
+        "exit_time_us",
+        PyArray1::from_vec(py, ledger.exit_time_us.clone()),
+    )?;
 
     out.set_item(
         "exit_offsets",
@@ -563,8 +621,49 @@ fn py_run_candle<'py>(
         "entry_strength",
         PyArray1::from_vec(py, trace.entry_strength.clone()),
     )?;
+    out.set_item("rejected_bar", PyArray1::from_vec(py, rejected.bar.clone()))?;
+    out.set_item(
+        "rejected_side",
+        PyArray1::from_vec(py, rejected.side.clone()),
+    )?;
+    out.set_item(
+        "rejected_fill_price",
+        PyArray1::from_vec(py, rejected.fill_price.clone()),
+    )?;
+    out.set_item(
+        "rejected_stop_price",
+        PyArray1::from_vec(py, rejected.stop_price.clone()),
+    )?;
+    out.set_item(
+        "rejected_target_price",
+        PyArray1::from_vec(py, rejected.target_price.clone()),
+    )?;
 
     Ok(out)
+}
+
+/// The Python `intrabar` callable as an [`IntrabarSource`]. It returns `(time_us, price)`
+/// arrays for a bar. A raised exception is kept here and re-raised by the caller.
+struct PyIntrabar<'py> {
+    callable: &'py Bound<'py, PyAny>,
+    error: RefCell<Option<PyErr>>,
+}
+
+impl IntrabarSource for PyIntrabar<'_> {
+    fn prices(&self, bar: usize) -> Result<IntrabarPrices, String> {
+        let prices = self.callable.call1((bar,)).and_then(|pair| {
+            let (time_us, price): (PyReadonlyArray1<'_, i64>, PyReadonlyArray1<'_, f64>) =
+                pair.extract()?;
+            Ok(IntrabarPrices {
+                time_us: time_us.as_array().to_vec(),
+                price: price.as_array().to_vec(),
+            })
+        });
+        prices.map_err(|err| {
+            *self.error.borrow_mut() = Some(err);
+            "intrabar callable raised an exception".to_string()
+        })
+    }
 }
 
 struct IdInterner {
@@ -1022,6 +1121,7 @@ pub(crate) fn register(parent: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(tick_bars, &m)?)?;
     m.add_function(wrap_pyfunction!(resolve_bar_ms, &m)?)?;
     m.add_function(wrap_pyfunction!(sample_at_bar_ends, &m)?)?;
+    m.add("PROTECTIVE_ORDERS", true)?;
     parent.add_submodule(&m)?;
     parent
         .py()

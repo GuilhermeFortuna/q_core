@@ -352,6 +352,8 @@ impl Case {
             volatility: self.volatility.as_deref(),
             tradable: self.tradable.as_deref(),
             columns: &lookup,
+            protective: None,
+            intrabar: None,
         };
         run_candle(&inputs, &self.config).map_err(|e| format!("{e:?}"))
     }

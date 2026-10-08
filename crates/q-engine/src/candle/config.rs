@@ -54,6 +54,11 @@ pub enum CandleError {
         reason: &'static str,
     },
     Exit(crate::ExitError),
+    /// The intrabar source failed, or returned no prices, for a bar that passed the screen.
+    IntrabarSource {
+        bar: usize,
+        reason: String,
+    },
 }
 
 #[cfg(test)]

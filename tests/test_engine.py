@@ -284,6 +284,151 @@ except TypeError as exc:
 else:
     raise AssertionError("expected TypeError for int64 entry")
 
+# intrabar stop and target orders: the same ledgers as protective_orders_gate.rs
+assert engine.PROTECTIVE_ORDERS is True
+HOUR = 3_600_000_000
+SECOND = 1_000_000
+
+
+def bar_times(bar, count):
+    return [(10 + bar) * HOUR + i * SECOND for i in range(count)]
+
+
+def protective_run(open_, high, low, entry, stop, target, intrabar):
+    count = len(open_)
+    return engine.run_candle(
+        time_us=np.array([(10 + b) * HOUR for b in range(count)], dtype=np.int64),
+        open=np.array(open_, dtype=np.float64),
+        high=np.array(high, dtype=np.float64),
+        low=np.array(low, dtype=np.float64),
+        close=None,
+        entry=np.array(entry, dtype=np.int8),
+        exit_long=np.zeros(count, dtype=bool),
+        exit_short=np.zeros(count, dtype=bool),
+        strength=np.array([1.0 if e else 0.0 for e in entry], dtype=np.float64),
+        bar_index=None,
+        volatility=None,
+        tradable=None,
+        columns={},
+        initial_capital=10_000.0,
+        point_value=1.0,
+        costs=None,
+        sizing={"type": "fixed_quantity", "quantity": 1.0, "scale_by_signal_strength": False},
+        sizing_point_value=1.0,
+        holding_period_bars=None,
+        exit_params={},
+        day_trade_us=None,
+        force_close_at_end=False,
+        stop_price=np.array(stop, dtype=np.float64),
+        target_price=np.array(target, dtype=np.float64),
+        intrabar=intrabar,
+    )
+
+
+def tape_source(bars, calls):
+    # Serves each listed bar's prices and records every call; any other bar fails the run.
+
+    def source(bar):
+        calls.append(bar)
+        if bar not in bars:
+            raise AssertionError(f"unexpected call for bar {bar}")
+        prices = bars[bar]
+        return (
+            np.array(bar_times(bar, len(prices)), dtype=np.int64),
+            np.array(prices, dtype=np.float64),
+        )
+
+    return source
+
+
+NAN = float("nan")
+# Criterion 1: a long closes at its stop; the first price at or below 95 fills there.
+calls = []
+out = protective_run(
+    [100, 100, 100], [100, 101, 101], [100, 100, 94], [1, 0, 0],
+    [95, NAN, NAN], [110, NAN, NAN],
+    tape_source({2: [101, 96, 95, 94]}, calls),
+)
+assert out["exit_bar"].tolist() == [2]
+assert out["exit_price"].tolist() == [95.0]
+assert out["exit_reason"].tolist() == [14]
+assert out["exit_reason_text"] == ["STOP_LOSS"]
+assert out["exit_time_us"].tolist() == [bar_times(2, 3)[2]]
+assert calls == [2], calls
+
+# Criterion 2: a bar holding both levels resolves by price order.
+for prices, want_price, want_reason, want_text in [
+    ([100, 111, 94], 110.0, 15, "TAKE_PROFIT"),
+    ([100, 94, 111], 94.0, 14, "STOP_LOSS"),
+]:
+    out = protective_run(
+        [100, 100, 100], [100, 100, 111], [100, 100, 94], [1, 0, 0],
+        [95, NAN, NAN], [110, NAN, NAN],
+        tape_source({2: prices}, []),
+    )
+    assert out["exit_price"].tolist() == [want_price], prices
+    assert out["exit_reason"].tolist() == [want_reason], prices
+    assert out["exit_reason_text"] == [want_text], prices
+
+# Criterion 6: a long whose stop sits at its fill is not opened and is reported.
+calls = []
+out = protective_run(
+    [100, 100], [100, 101], [100, 99], [1, 0],
+    [100, NAN], [NAN, NAN],
+    tape_source({}, calls),
+)
+assert len(out["entry_bar"]) == 0
+assert out["rejected_bar"].tolist() == [1]
+assert out["rejected_side"].tolist() == [1]
+assert out["rejected_fill_price"].tolist() == [100.0]
+assert out["rejected_stop_price"].tolist() == [100.0]
+assert np.isnan(out["rejected_target_price"][0])
+assert calls == [], calls
+
+# Criterion 11: an exception raised by the callable reaches the caller unchanged.
+class Boom(RuntimeError):
+    pass
+
+
+def raising(bar):
+    raise Boom("feed unavailable")
+
+
+try:
+    protective_run(
+        [100, 100, 100], [100, 101, 101], [100, 100, 94], [1, 0, 0],
+        [95, NAN, NAN], [110, NAN, NAN], raising,
+    )
+except Boom as exc:
+    assert str(exc) == "feed unavailable"
+else:
+    raise AssertionError("expected the callable's Boom to propagate")
+
+# Levels need the callable, and stop and target travel together.
+try:
+    protective_run(
+        [100, 100, 100], [100, 101, 101], [100, 100, 94], [1, 0, 0],
+        [95, NAN, NAN], [110, NAN, NAN], None,
+    )
+except ValueError as exc:
+    assert "protective" in str(exc)
+else:
+    raise AssertionError("expected ValueError without an intrabar callable")
+try:
+    engine.run_candle(
+        time_us=np.zeros(3, dtype=np.int64), open=np.ones(3), high=np.ones(3), low=np.ones(3),
+        close=None, entry=np.zeros(3, dtype=np.int8), exit_long=np.zeros(3, dtype=bool),
+        exit_short=np.zeros(3, dtype=bool), strength=np.zeros(3), columns={},
+        initial_capital=1.0, point_value=1.0, costs=None,
+        sizing={"type": "fixed_quantity", "quantity": 1.0, "scale_by_signal_strength": False},
+        sizing_point_value=1.0, exit_params={}, force_close_at_end=False,
+        stop_price=np.ones(3),
+    )
+except ValueError as exc:
+    assert "stop_price" in str(exc) and "target_price" in str(exc)
+else:
+    raise AssertionError("expected ValueError for a lone stop_price")
+
 print("engine projection checks passed")
 """
 

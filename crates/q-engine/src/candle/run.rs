@@ -4,6 +4,7 @@ use crate::exits::{ExitInputs, ExitRuleId, ExitRuleSet, PositionKey, Side};
 
 use super::decision::{Decision, DecisionStep, QueuedEntry, TradeView};
 use super::inputs::CandleInputs;
+use super::protective::{Levels, RejectedEntries};
 use super::{side_cost, CandleConfig, CandleError};
 
 /// Microseconds in one calendar day.
@@ -16,6 +17,10 @@ pub enum ExitReason {
     Signal,
     EndOfDay,
     ForceClose,
+    /// An intrabar stop level was reached.
+    StopLoss,
+    /// An intrabar target level was traded through.
+    TakeProfit,
 }
 
 impl ExitReason {
@@ -25,6 +30,8 @@ impl ExitReason {
             Self::Signal => 11,
             Self::EndOfDay => 12,
             Self::ForceClose => 13,
+            Self::StopLoss => 14,
+            Self::TakeProfit => 15,
         }
     }
 
@@ -34,6 +41,8 @@ impl ExitReason {
             Self::Signal => "SIGNAL",
             Self::EndOfDay => "END_OF_DAY",
             Self::ForceClose => "FORCE_CLOSE",
+            Self::StopLoss => "STOP_LOSS",
+            Self::TakeProfit => "TAKE_PROFIT",
         }
     }
 }
@@ -54,6 +63,8 @@ pub struct TradeLedger {
     pub pnl: Vec<f64>,
     /// [`ExitReason::code`], `-1` = still open.
     pub exit_reason: Vec<i64>,
+    /// Time of the price that triggered an intrabar stop or target; `-1` for every other exit.
+    pub exit_time_us: Vec<i64>,
 }
 
 /// Per bar: `exit_reason[exit_offsets[i]..exit_offsets[i + 1]]` and the entry.
@@ -74,6 +85,8 @@ pub struct DecisionTrace {
 pub struct CandleRun {
     pub trades: TradeLedger,
     pub trace: DecisionTrace,
+    /// Entries refused because a level was already on the wrong side of the fill.
+    pub rejected: RejectedEntries,
 }
 
 /// One trade while the loop holds it; the ledger is this vector projected into columns.
@@ -89,6 +102,8 @@ struct Trade {
     exit_price: f64,
     pnl: f64,
     exit_reason: i64,
+    levels: Levels,
+    exit_time_us: i64,
 }
 
 /// `TradeRegistry.close_trade` plus `_close_trade_with_costs`: charge the exit side, then
@@ -192,6 +207,8 @@ where
     let mut trades: Vec<Trade> = Vec::new();
     let mut capital = config.initial_capital;
     let mut queued = Decision::default();
+    let mut queued_levels = Levels::NONE;
+    let mut rejected = RejectedEntries::default();
 
     let mut trace = DecisionTrace {
         exit_offsets: Vec::with_capacity(n + 1),
@@ -235,10 +252,27 @@ where
                     close_all(&mut trades, bar, fill, reason, config, &mut capital);
                 }
 
-                // C. Size and open the queued entry.
+                // C. Size and open the queued entry, unless its levels already put it on the
+                // wrong side of the fill.
                 if let Some(entry) = queued.entry {
-                    open_entry(&mut trades, bar, fill, entry, inputs, config, capital);
+                    if queued_levels.rejects(entry.side, fill) {
+                        rejected.push(bar, entry.side, fill, queued_levels);
+                    } else {
+                        open_entry(
+                            &mut trades,
+                            bar,
+                            fill,
+                            entry,
+                            queued_levels,
+                            inputs,
+                            config,
+                            capital,
+                        );
+                    }
                 }
+
+                // Intrabar stops and targets fill inside this bar, ahead of section D.
+                protective_fills(&mut trades, bar, inputs, config, &mut capital)?;
 
                 // D. Evaluate this now-closed bar and queue for the next one.
                 decided = evaluate_bar(
@@ -252,6 +286,12 @@ where
                     last_bar_of_day,
                 );
                 queued = decided.clone();
+                // The levels are read from this bar only when it queues an entry.
+                queued_levels = if decided.entry.is_some() {
+                    Levels::queued_on(inputs.protective, bar)
+                } else {
+                    Levels::NONE
+                };
 
                 // E. Daily force-close on the last bar of the day. Section D has already
                 // cleared the queue on such a bar, so this only closes trades.
@@ -305,15 +345,75 @@ where
     Ok(CandleRun {
         trades: ledger(&trades),
         trace,
+        rejected,
     })
 }
 
+/// Between sections C and D: close each open trade that a level reached inside this bar.
+///
+/// The range screen decides whether the bar's trade prices are asked for at all. A trade opened
+/// on this bar skips the first price, which is its own fill.
+fn protective_fills(
+    trades: &mut [Trade],
+    bar: usize,
+    inputs: &CandleInputs<'_>,
+    config: &CandleConfig,
+    capital: &mut f64,
+) -> Result<(), CandleError> {
+    let (Some(source), Some(high), Some(low)) = (inputs.intrabar, inputs.high, inputs.low) else {
+        return Ok(());
+    };
+    let reached: Vec<usize> = trades
+        .iter()
+        .enumerate()
+        .filter(|(_, trade)| {
+            trade.open
+                && trade
+                    .levels
+                    .reached_by_range(trade.side, high[bar], low[bar])
+        })
+        .map(|(index, _)| index)
+        .collect();
+    if reached.is_empty() {
+        return Ok(());
+    }
+
+    let source_error = |reason: &str| CandleError::IntrabarSource {
+        bar,
+        reason: reason.to_string(),
+    };
+    let prices = source.prices(bar).map_err(|reason| source_error(&reason))?;
+    if prices.price.is_empty() {
+        return Err(source_error("returned no prices"));
+    }
+    if prices.time_us.len() != prices.price.len() {
+        return Err(source_error("time_us and price differ in length"));
+    }
+
+    for index in reached {
+        let trade = &mut trades[index];
+        let skip_first = trade.entry_bar == bar;
+        let Some(trigger) = trade.levels.first_trigger(trade.side, &prices, skip_first) else {
+            continue;
+        };
+        let pnl = close_trade(trade, bar, trigger.price, trigger.reason, config);
+        trade.exit_time_us = trigger.time_us;
+        *capital += pnl;
+    }
+    Ok(())
+}
+
 /// Section C: size at the fill price with the current capital, trim to the cap, open.
+#[allow(
+    clippy::too_many_arguments,
+    reason = "section C reads the queued levels alongside the bar's state"
+)]
 fn open_entry(
     trades: &mut Vec<Trade>,
     bar: usize,
     fill: f64,
     entry: QueuedEntry,
+    levels: Levels,
     inputs: &CandleInputs<'_>,
     config: &CandleConfig,
     capital: f64,
@@ -353,6 +453,8 @@ fn open_entry(
         exit_price: f64::NAN,
         pnl: f64::NAN,
         exit_reason: -1,
+        levels,
+        exit_time_us: -1,
     });
 }
 
@@ -430,6 +532,7 @@ fn ledger(trades: &[Trade]) -> TradeLedger {
         ledger.commission.push(trade.commission);
         ledger.pnl.push(trade.pnl);
         ledger.exit_reason.push(trade.exit_reason);
+        ledger.exit_time_us.push(trade.exit_time_us);
     }
     ledger
 }
@@ -470,6 +573,20 @@ fn validate(inputs: &CandleInputs<'_>, config: &CandleConfig) -> Result<(), Cand
     if let Some(tradable) = inputs.tradable {
         check("tradable", tradable.len())?;
     }
+    if let Some(protective) = inputs.protective {
+        if inputs.intrabar.is_none()
+            || inputs.open.is_none()
+            || inputs.high.is_none()
+            || inputs.low.is_none()
+        {
+            return Err(CandleError::InvalidConfig {
+                field: "protective",
+                reason: "requires intrabar, open, high and low".to_string(),
+            });
+        }
+        check("stop_price", protective.stop_price.len())?;
+        check("target_price", protective.target_price.len())?;
+    }
 
     for (bar, &entry) in signals.entry.iter().enumerate() {
         if !(-1..=1).contains(&entry) {
@@ -508,6 +625,23 @@ fn validate(inputs: &CandleInputs<'_>, config: &CandleConfig) -> Result<(), Cand
                 bar,
                 reason: "contains NaN",
             });
+        }
+    }
+
+    if let Some(protective) = inputs.protective {
+        for (column, levels) in [
+            ("stop_price", protective.stop_price),
+            ("target_price", protective.target_price),
+        ] {
+            for (bar, &level) in levels.iter().enumerate() {
+                if !level.is_nan() && (!level.is_finite() || level <= 0.0) {
+                    return Err(CandleError::InvalidSignal {
+                        column,
+                        bar,
+                        reason: "must be NaN or a finite positive price",
+                    });
+                }
+            }
         }
     }
 
@@ -619,6 +753,8 @@ mod tests {
                 volatility: self.volatility.as_deref(),
                 tradable: self.tradable.as_deref(),
                 columns: &columns,
+                protective: None,
+                intrabar: None,
             };
             run_candle(&inputs, config)
         }
