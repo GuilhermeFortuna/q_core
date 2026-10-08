@@ -12,6 +12,8 @@ pub struct SignalColumns<'a> {
     pub bar_index: Option<&'a [i64]>,
 }
 
+use super::protective::{IntrabarSource, ProtectiveColumns};
+
 /// Every column one run reads.
 pub struct CandleInputs<'a> {
     /// Wall-clock microseconds, any order, repeats allowed.
@@ -26,4 +28,8 @@ pub struct CandleInputs<'a> {
     pub tradable: Option<&'a [bool]>,
     /// Exit-rule indicator columns by name.
     pub columns: &'a dyn Fn(&str) -> Option<&'a [f64]>,
+    /// Stop and target levels for entries; requires `intrabar`, `open`, `high` and `low`.
+    pub protective: Option<ProtectiveColumns<'a>>,
+    /// Trade prices of a bar, asked for only when the bar's range reaches an open level.
+    pub intrabar: Option<&'a dyn IntrabarSource>,
 }

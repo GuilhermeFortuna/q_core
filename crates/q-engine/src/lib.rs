@@ -10,8 +10,9 @@ pub mod tick;
 
 pub use candle::{
     run_candle, CandleConfig, CandleError, CandleInputs, CandleRun, Costs, DayTradeWindow,
-    Decision, DecisionStep, DecisionTrace, ExitReason, QueuedEntry, QueuedExit, SignalColumns,
-    Sizing, TradeLedger, TradeView,
+    Decision, DecisionStep, DecisionTrace, ExitReason, IntrabarPrices, IntrabarSource,
+    ProtectiveColumns, QueuedEntry, QueuedExit, RejectedEntries, SignalColumns, Sizing,
+    TradeLedger, TradeView,
 };
 pub use exits::{
     ExitBook, ExitDecision, ExitError, ExitInputs, ExitParams, ExitRuleId, ExitRuleSet,
