@@ -31,6 +31,33 @@ when no trades arrive. The rate deque holds at most 100,000 events; exceeding th
 capacity returns `VolumeError::CapacityExceeded` without changing state. To change
 configuration, create a new state and replay the desired input history.
 
+## Intrabar Protective Orders (`q-engine::candle`)
+
+`run_candle` can fill an entry's stop and target inside the bar where they trade. Both levels are
+optional per-bar absolute prices in `protective`: an entry queued on bar `b` carries the levels of
+bar `b`, and `NaN` means no level. Requires `intrabar`, `open`, `high` and `low`; levels must be
+`NaN` or finite and positive.
+
+Between sections C and D of each tradable bar that is not force-closed:
+
+1. **Entry check (section C).** A queued entry whose level is already on the wrong side of its fill
+   is not opened and is reported in `rejected`. A long needs `stop < fill` and `target > fill`; a
+   short needs `stop > fill` and `target < fill`. Only the levels that are set are checked.
+2. **Screen.** A long's stop is reached when `low <= stop` and its target when `high > target`; a
+   short's stop when `high >= stop` and its target when `low < target`. The source is called only
+   when some open trade's level passes the screen, and at most once per bar.
+3. **Walk.** The bar's trade prices are walked in order. A stop fills at the first price at or
+   beyond its level, so a bar that opens past the level fills at its open. A target fills at its
+   level once a price trades strictly through it; a price equal to the target does not fill. The
+   first trigger in price order closes the trade with `STOP_LOSS` or `TAKE_PROFIT`. A trade opened
+   on this bar skips its first price, which is its own fill.
+4. **Close.** The trade closes at the triggering fill price, charged its exit-side cost, and its
+   time is recorded in `exit_time_us`. A screen pass with no triggering price leaves the trade open.
+   A source that returns no prices, or fails, ends the run with `CandleError::IntrabarSource` naming
+   the bar.
+
+Section D sees a protected trade as closed. Without `protective`, every output is unchanged.
+
 ## Crate Responsibilities
 
 Every responsibility named in §5 of the system architecture is mapped to exactly one crate:
