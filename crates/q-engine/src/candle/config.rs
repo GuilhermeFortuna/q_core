@@ -1,3 +1,5 @@
+use crate::exits::Side;
+
 use super::Sizing;
 
 #[derive(Clone, Copy, Debug)]
@@ -58,6 +60,14 @@ pub enum CandleError {
     IntrabarSource {
         bar: usize,
         reason: String,
+    },
+    /// A priced entry's price lies outside the range of the bar that decided it.
+    EntryPriceOutsideRange {
+        bar: usize,
+        side: Side,
+        price: f64,
+        low: f64,
+        high: f64,
     },
 }
 

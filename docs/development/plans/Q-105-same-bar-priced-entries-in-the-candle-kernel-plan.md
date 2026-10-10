@@ -21,12 +21,12 @@
 
 ## Ordered implementation
 
-- [ ] 1. Add `crates/q-engine/tests/priced_entries_gate.rs` with criteria 1 to 7 and a counting source. Confirm it fails for the expected reason.
-- [ ] 2. Extend `candle/protective.rs`: `entry_price` in `ProtectiveColumns`, validation, the range check and a pure `touch_index(prices, price, open)` with unit tests at the boundaries (equal to open, equal to high, one step beyond).
-- [ ] 3. In `candle/run.rs` section D: when the decision has an entry and a price, check the range, apply `Levels::rejects` against the price, call `open_entry` with the price as fill, clear `decided.entry`, then resolve its levels over the prices after the touch. Update the `CandleInputs` constructors to pass `None`.
-- [ ] 4. Run `cargo test -p q-engine`; the new gate passes and `candle_engine_gate`, `decision_step_gate`, `exit_rules_gate` and `protective_orders_gate` pass with unchanged bodies. Commit.
-- [ ] 5. Project through `crates/q-py/src/engine.rs`: the `entry_price` keyword, the extended callback tuple and the range error. Add cases to `tests/test_engine.py` for criterion 9.
-- [ ] 6. Document the rule in `README.md`. Run `make check`. Commit.
+- [x] 1. Add `crates/q-engine/tests/priced_entries_gate.rs` with criteria 1 to 7 and a counting source. Confirm it fails for the expected reason.
+- [x] 2. Extend `candle/protective.rs`: `entry_price` in `ProtectiveColumns`, validation, the range check and a pure `touch_index(prices, price, open)` with unit tests at the boundaries (equal to open, equal to high, one step beyond).
+- [x] 3. In `candle/run.rs` section D: when the decision has an entry and a price, check the range, apply `Levels::rejects` against the price, call `open_entry` with the price as fill, clear `decided.entry`, then resolve its levels over the prices after the touch. Update the `CandleInputs` constructors to pass `None`.
+- [x] 4. Run `cargo test -p q-engine`; the new gate passes and `candle_engine_gate`, `decision_step_gate`, `exit_rules_gate` and `protective_orders_gate` pass with unchanged bodies. Commit.
+- [x] 5. Project through `crates/q-py/src/engine.rs`: the `entry_price` keyword, the extended callback tuple and the range error. Add cases to `tests/test_engine.py` for criterion 9.
+- [x] 6. Document the rule in `README.md`. Run `make check`. Commit.
 
 ## Review focus
 

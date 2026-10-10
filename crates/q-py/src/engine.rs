@@ -62,6 +62,22 @@ fn candle_error(err: CandleError) -> PyErr {
         CandleError::IntrabarSource { bar, reason } => {
             PyValueError::new_err(format!("intrabar[{bar}]: {reason}"))
         }
+        CandleError::EntryPriceOutsideRange {
+            bar,
+            side,
+            price,
+            low,
+            high,
+        } => {
+            let side = if matches!(side, Side::Long) {
+                "long"
+            } else {
+                "short"
+            };
+            PyValueError::new_err(format!(
+                "entry_price[{bar}]: {side} price {price} is outside the bar range [{low}, {high}]"
+            ))
+        }
     }
 }
 
@@ -399,6 +415,7 @@ fn extract_f64<'py>(
     force_close_at_end,
     stop_price=None,
     target_price=None,
+    entry_price=None,
     intrabar=None,
     strategy_callback=None,
     exit_screen_callback=None,
@@ -430,6 +447,7 @@ fn py_run_candle<'py>(
     force_close_at_end: bool,
     stop_price: Option<&Bound<'py, PyAny>>,
     target_price: Option<&Bound<'py, PyAny>>,
+    entry_price: Option<&Bound<'py, PyAny>>,
     intrabar: Option<&Bound<'py, PyAny>>,
     strategy_callback: Option<&Bound<'py, PyAny>>,
     exit_screen_callback: Option<&Bound<'py, PyAny>>,
@@ -503,6 +521,13 @@ fn py_run_candle<'py>(
             "stop_price and target_price must be passed together",
         ));
     }
+    let entry_arr = entry_price
+        .map(|obj| extract_f64("entry_price", obj))
+        .transpose()?;
+    let entry_price = entry_arr
+        .as_ref()
+        .map(|a| contiguous_f64("entry_price", a))
+        .transpose()?;
     let source = intrabar.map(|callable| PyIntrabar {
         callable,
         error: RefCell::new(None),
@@ -623,10 +648,27 @@ fn py_run_candle<'py>(
         None
     };
     let target_price = owned_target_price.as_deref().or(target_price);
-    let protective = match (stop_price, target_price) {
-        (Some(stop_price), Some(target_price)) => Some(ProtectiveColumns {
+    let owned_entry_price = if owns_buffers {
+        entry_price.map(<[_]>::to_vec)
+    } else {
+        None
+    };
+    let entry_price = owned_entry_price.as_deref().or(entry_price);
+    // A priced entry without levels pairs with NaN level columns, which the kernel reads as none.
+    let unset_levels = match (stop_price, target_price, entry_price) {
+        (None, None, Some(_)) => vec![f64::NAN; time_us.len()],
+        _ => Vec::new(),
+    };
+    let protective = match (stop_price, target_price, entry_price) {
+        (Some(stop_price), Some(target_price), entry_price) => Some(ProtectiveColumns {
             stop_price,
             target_price,
+            entry_price,
+        }),
+        (None, None, Some(entry_price)) => Some(ProtectiveColumns {
+            stop_price: &unset_levels,
+            target_price: &unset_levels,
+            entry_price: Some(entry_price),
         }),
         _ => None,
     };
@@ -802,16 +844,16 @@ fn position_tuples<'py>(
 }
 
 /// `(entry, exit_long, exit_short, strength)`, optionally followed by the `(stop_price,
-/// target_price)` of an entry queued on this bar. `NaN` means no level.
+/// target_price)` of an entry queued on this bar and then its `entry_price`. `NaN` means none.
 fn strategy_decision(returned: &Bound<'_, PyAny>) -> Result<BarSignals, StrategyRunError> {
     let tuple = returned.downcast::<PyTuple>().map_err(|_| {
         StrategyRunError::Python(PyTypeError::new_err(
-            "strategy_callback must return (entry, exit_long, exit_short, strength[, stop_price, target_price])",
+            "strategy_callback must return (entry, exit_long, exit_short, strength[, stop_price, target_price[, entry_price]])",
         ))
     })?;
-    if tuple.len() != 4 && tuple.len() != 6 {
+    if !matches!(tuple.len(), 4 | 6 | 7) {
         return Err(StrategyRunError::Python(PyTypeError::new_err(
-            "strategy_callback must return four or six values",
+            "strategy_callback must return four, six or seven values",
         )));
     }
     let entry = tuple.get_item(0)?;
@@ -825,10 +867,16 @@ fn strategy_decision(returned: &Bound<'_, PyAny>) -> Result<BarSignals, Strategy
             "strategy_callback requires integer entry and boolean exit flags",
         )));
     }
-    let levels = if tuple.len() == 6 {
+    let levels = if tuple.len() >= 6 {
         let stop: f64 = tuple.get_item(4)?.extract()?;
         let target: f64 = tuple.get_item(5)?.extract()?;
         Some((stop, target))
+    } else {
+        None
+    };
+    let entry_price = if tuple.len() == 7 {
+        let price: f64 = tuple.get_item(6)?.extract()?;
+        Some(price)
     } else {
         None
     };
@@ -838,6 +886,7 @@ fn strategy_decision(returned: &Bound<'_, PyAny>) -> Result<BarSignals, Strategy
         exit_short: short.extract()?,
         strength: tuple.get_item(3)?.extract()?,
         levels,
+        entry_price,
     })
 }
 

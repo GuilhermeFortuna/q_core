@@ -4,7 +4,7 @@ use crate::exits::{ExitInputs, ExitRuleId, ExitRuleSet, PositionKey, Side};
 
 use super::decision::{Decision, DecisionStep, QueuedEntry, TradeView};
 use super::inputs::{BarSignals, CandleInputs};
-use super::protective::{Levels, RejectedEntries};
+use super::protective::{touch_index, IntrabarPrices, IntrabarSource, Levels, RejectedEntries};
 use super::{side_cost, CandleConfig, CandleError};
 
 /// Microseconds in one calendar day.
@@ -133,7 +133,8 @@ fn close_trade(
     pnl
 }
 
-/// Close every open trade at one price, as sections A, B and E do.
+/// Close every open trade at one price, as sections A, B and E do. `keep` names a trade the close
+/// leaves open: a priced entry opened by the decision that queued the close.
 fn close_all(
     trades: &mut [Trade],
     bar: usize,
@@ -141,8 +142,12 @@ fn close_all(
     reason: ExitReason,
     config: &CandleConfig,
     capital: &mut f64,
+    keep: Option<usize>,
 ) {
-    for trade in trades.iter_mut().filter(|trade| trade.open) {
+    for (index, trade) in trades.iter_mut().enumerate() {
+        if !trade.open || Some(index) == keep {
+            continue;
+        }
         let pnl = close_trade(trade, bar, price, reason, config);
         *capital += pnl;
     }
@@ -299,6 +304,9 @@ fn strategy_signals<E: From<CandleError>>(
         check_level("stop_price", bar, stop)?;
         check_level("target_price", bar, target)?;
     }
+    if let Some(price) = signals.entry_price {
+        check_level("entry_price", bar, price)?;
+    }
     if !(-1..=1).contains(&signals.entry) {
         return Err(CandleError::InvalidSignal {
             column: "entry",
@@ -343,6 +351,9 @@ where
     let mut capital = config.initial_capital;
     let mut queued = Decision::default();
     let mut queued_levels = Levels::NONE;
+    // The priced trade that the queued decision opened on its own bar. The queued close must not
+    // take it: the close only clears trades the decision saw open.
+    let mut queued_exempt: Option<usize> = None;
     let mut rejected = RejectedEntries::default();
 
     let mut trace = DecisionTrace {
@@ -377,15 +388,25 @@ where
                     ExitReason::EndOfDay,
                     config,
                     &mut capital,
+                    None,
                 );
                 queued = Decision::default();
+                queued_exempt = None;
                 strategy_signals(&mut callbacks, bar, &trades)?;
             } else {
                 // B. The first queued close takes out every open trade under its own reason;
                 // the Python loop's later closes find nothing open on the symbol.
                 if let Some(first) = queued.exits.first() {
                     let reason = first.rule.map_or(ExitReason::Signal, ExitReason::Rule);
-                    close_all(&mut trades, bar, fill, reason, config, &mut capital);
+                    close_all(
+                        &mut trades,
+                        bar,
+                        fill,
+                        reason,
+                        config,
+                        &mut capital,
+                        queued_exempt,
+                    );
                 }
 
                 // C. Size and open the queued entry, unless its levels already put it on the
@@ -426,7 +447,8 @@ where
                     runtime_signals,
                 );
                 queued = decided.clone();
-                // The levels are read from this bar only when it queues an entry.
+                queued_exempt = None;
+                // The levels and price are read from this bar only when it decides an entry.
                 queued_levels = if decided.entry.is_some() {
                     entry_levels(
                         inputs,
@@ -436,6 +458,24 @@ where
                 } else {
                     Levels::NONE
                 };
+                // A priced entry fills on this bar, so it is never queued for the next one.
+                if let Some(entry) = decided.entry {
+                    let runtime_price = runtime_signals.and_then(|signals| signals.entry_price);
+                    if let Some(price) = priced_entry(inputs, bar, entry.side, runtime_price)? {
+                        queued.entry = None;
+                        queued_exempt = open_priced_entry(
+                            &mut trades,
+                            bar,
+                            entry,
+                            price,
+                            queued_levels,
+                            inputs,
+                            config,
+                            &mut capital,
+                            &mut rejected,
+                        )?;
+                    }
+                }
 
                 // E. Daily force-close on the last bar of the day. Section D has already
                 // cleared the queue on such a bar, so this only closes trades.
@@ -448,8 +488,10 @@ where
                         ExitReason::EndOfDay,
                         config,
                         &mut capital,
+                        None,
                     );
                     queued = Decision::default();
+                    queued_exempt = None;
                 }
             }
         } else {
@@ -538,17 +580,7 @@ fn intrabar_fills<E: From<CandleError>>(
         return Ok(());
     }
 
-    let source_error = |reason: &str| CandleError::IntrabarSource {
-        bar,
-        reason: reason.to_string(),
-    };
-    let prices = source.prices(bar).map_err(|reason| source_error(&reason))?;
-    if prices.price.is_empty() {
-        return Err(source_error("returned no prices").into());
-    }
-    if prices.time_us.len() != prices.price.len() {
-        return Err(source_error("time_us and price differ in length").into());
-    }
+    let prices = intrabar_prices(source, bar)?;
 
     let mut tick_exit = if screened { exit } else { None };
     for (tick, (&time_us, &price)) in prices.time_us.iter().zip(&prices.price).enumerate() {
@@ -581,6 +613,145 @@ fn intrabar_fills<E: From<CandleError>>(
                 *capital += pnl;
             }
         }
+    }
+    Ok(())
+}
+
+/// A bar's trade prices from the source. The source must return a price and one time per price.
+fn intrabar_prices<E: From<CandleError>>(
+    source: &dyn IntrabarSource,
+    bar: usize,
+) -> Result<IntrabarPrices, E> {
+    let source_error = |reason: &str| CandleError::IntrabarSource {
+        bar,
+        reason: reason.to_string(),
+    };
+    let prices = source.prices(bar).map_err(|reason| source_error(&reason))?;
+    if prices.price.is_empty() {
+        return Err(source_error("returned no prices").into());
+    }
+    if prices.time_us.len() != prices.price.len() {
+        return Err(source_error("time_us and price differ in length").into());
+    }
+    Ok(prices)
+}
+
+/// The fill price of an entry decided on `bar`, or `None` when it has none and queues for the next
+/// open. A runtime price takes precedence over the static column. A price must lie within the
+/// bar's range, which needs open, high and low.
+fn priced_entry(
+    inputs: &CandleInputs<'_>,
+    bar: usize,
+    side: Side,
+    runtime: Option<f64>,
+) -> Result<Option<f64>, CandleError> {
+    let price = runtime.unwrap_or_else(|| {
+        inputs
+            .protective
+            .and_then(|columns| columns.entry_price)
+            .map_or(f64::NAN, |prices| prices[bar])
+    });
+    if price.is_nan() {
+        return Ok(None);
+    }
+    let (Some(_), Some(high), Some(low)) = (inputs.open, inputs.high, inputs.low) else {
+        return Err(CandleError::InvalidConfig {
+            field: "entry_price",
+            reason: "requires open, high and low".to_string(),
+        });
+    };
+    // Written as the in-range test so a NaN bar bound rejects the price.
+    let inside = low[bar] <= price && price <= high[bar];
+    if !inside {
+        return Err(CandleError::EntryPriceOutsideRange {
+            bar,
+            side,
+            price,
+            low: low[bar],
+            high: high[bar],
+        });
+    }
+    Ok(Some(price))
+}
+
+/// Section D's priced entry: refused when its levels already sit on the wrong side of the price,
+/// otherwise opened at the price on this bar and resolved from the trade prices after its touch.
+#[allow(
+    clippy::too_many_arguments,
+    reason = "a priced entry reads the bar's state, its costs, its levels and the rejection log"
+)]
+fn open_priced_entry<E: From<CandleError>>(
+    trades: &mut Vec<Trade>,
+    bar: usize,
+    entry: QueuedEntry,
+    price: f64,
+    levels: Levels,
+    inputs: &CandleInputs<'_>,
+    config: &CandleConfig,
+    capital: &mut f64,
+    rejected: &mut RejectedEntries,
+) -> Result<Option<usize>, E> {
+    if levels.rejects(entry.side, price) {
+        rejected.push(bar, entry.side, price, levels);
+        return Ok(None);
+    }
+    let opened = trades.len();
+    open_entry(trades, bar, price, entry, levels, inputs, config, *capital);
+    if trades.len() == opened {
+        return Ok(None);
+    }
+    resolve_entry_levels(&mut trades[opened], bar, inputs, config, capital)?;
+    Ok(Some(opened))
+}
+
+/// Resolves a priced entry's own stop and target from the bar's trade prices after its touch. The
+/// source is asked only when the bar's range reaches one of the levels. The first price after the
+/// touch that triggers a level closes the trade; the touch itself is the entry and is skipped.
+fn resolve_entry_levels<E: From<CandleError>>(
+    trade: &mut Trade,
+    bar: usize,
+    inputs: &CandleInputs<'_>,
+    config: &CandleConfig,
+    capital: &mut f64,
+) -> Result<(), E> {
+    let (Some(source), Some(open), Some(high), Some(low)) =
+        (inputs.intrabar, inputs.open, inputs.high, inputs.low)
+    else {
+        return Ok(());
+    };
+    if !trade
+        .levels
+        .reached_by_range(trade.side, high[bar], low[bar])
+    {
+        return Ok(());
+    }
+
+    let prices = intrabar_prices(source, bar)?;
+    let touch = touch_index(&prices.price, trade.entry_price, open[bar]).ok_or_else(|| {
+        CandleError::IntrabarSource {
+            bar,
+            reason: format!(
+                "no trade price reaches the entry price {}",
+                trade.entry_price
+            ),
+        }
+    })?;
+
+    let exit = prices
+        .time_us
+        .iter()
+        .zip(&prices.price)
+        .skip(touch + 1)
+        .find_map(|(&time_us, &price)| {
+            trade
+                .levels
+                .trigger(trade.side, price)
+                .map(|(reason, fill)| (time_us, reason, fill))
+        });
+    if let Some((time_us, reason, fill)) = exit {
+        let pnl = close_trade(trade, bar, fill, reason, config);
+        trade.exit_time_us = time_us;
+        *capital += pnl;
     }
     Ok(())
 }
@@ -806,10 +977,22 @@ fn validate(inputs: &CandleInputs<'_>, config: &CandleConfig) -> Result<(), Cand
         check("tradable", tradable.len())?;
     }
     if let Some(protective) = inputs.protective {
-        if inputs.intrabar.is_none()
-            || inputs.open.is_none()
-            || inputs.high.is_none()
-            || inputs.low.is_none()
+        let bar_range = inputs.open.is_some() && inputs.high.is_some() && inputs.low.is_some();
+        if protective.entry_price.is_some() && !bar_range {
+            return Err(CandleError::InvalidConfig {
+                field: "entry_price",
+                reason: "requires open, high and low".to_string(),
+            });
+        }
+        // Without an entry price the columns are levels alone. Levels need the intrabar source;
+        // a column of only NaN levels beside a priced entry does not.
+        let levels_set = protective
+            .stop_price
+            .iter()
+            .chain(protective.target_price)
+            .any(|level| !level.is_nan());
+        if (protective.entry_price.is_none() || levels_set)
+            && (inputs.intrabar.is_none() || !bar_range)
         {
             return Err(CandleError::InvalidConfig {
                 field: "protective",
@@ -818,6 +1001,9 @@ fn validate(inputs: &CandleInputs<'_>, config: &CandleConfig) -> Result<(), Cand
         }
         check("stop_price", protective.stop_price.len())?;
         check("target_price", protective.target_price.len())?;
+        if let Some(entry_price) = protective.entry_price {
+            check("entry_price", entry_price.len())?;
+        }
     }
 
     for (bar, &entry) in signals.entry.iter().enumerate() {
@@ -864,6 +1050,7 @@ fn validate(inputs: &CandleInputs<'_>, config: &CandleConfig) -> Result<(), Cand
         for (column, levels) in [
             ("stop_price", protective.stop_price),
             ("target_price", protective.target_price),
+            ("entry_price", protective.entry_price.unwrap_or(&[])),
         ] {
             for (bar, &level) in levels.iter().enumerate() {
                 check_level(column, bar, level)?;

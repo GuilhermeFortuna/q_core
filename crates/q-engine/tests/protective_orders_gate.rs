@@ -159,6 +159,7 @@ impl Scenario {
             protective: Some(ProtectiveColumns {
                 stop_price: &self.stop,
                 target_price: &self.target,
+                entry_price: None,
             }),
             intrabar,
         };

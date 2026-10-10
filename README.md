@@ -45,14 +45,15 @@ Python callers may pass `strategy_callback` to `q_core.engine.run_candle`. It re
 `(bar, positions)`, where positions is a tuple of
 `(ledger_ordinal, side, entry_bar, entry_price, quantity)` tuples (`side` is `1` or `-1`).
 It returns `(entry, exit_long, exit_short, strength)`, or
-`(entry, exit_long, exit_short, strength, stop_price, target_price)` to give an entry queued
-on this bar its own levels (`NaN` means no level; without the two extra values the static
-`stop_price`/`target_price` columns apply). Entry is `-1`, `0`, or `1`, exit flags are booleans,
-strength must be finite and within `[0, 1]`, and levels must be `NaN` or finite and positive.
-Runtime levels need the `intrabar` source, as static ones do. Invalid decisions or callback
-exceptions abort the run. Callback runs own copies of input arrays so host mutations cannot
-change the simulation. Calls without these arguments retain the static signal path. This native
-extension requires no contract or Qt API changes.
+`(entry, exit_long, exit_short, strength, stop_price, target_price)` to give an entry decided
+on this bar its own levels, optionally followed by its `entry_price` (a seventh value; see
+[Priced entries](#priced-entries-q-enginecandle)). `NaN` means no level or price; without the
+extra values the static columns apply. Entry is `-1`, `0`, or `1`, exit flags are booleans,
+strength must be finite and within `[0, 1]`, and levels and prices must be `NaN` or finite and
+positive. Runtime levels need the `intrabar` source, as static ones do. Invalid decisions or
+callback exceptions abort the run. Callback runs own copies of input arrays so host mutations
+cannot change the simulation. Calls without these arguments retain the static signal path. This
+native extension requires no contract or Qt API changes.
 
 Custom intrabar exits are requested with `exit_screen_callback` and `exit_tick_callback`,
 which must be passed together and require `intrabar`. The screen receives
@@ -93,6 +94,36 @@ Between sections C and D of each tradable bar that is not force-closed:
    the bar.
 
 Section D sees a protected trade as closed. Without `protective`, every output is unchanged.
+
+## Priced entries (`q-engine::candle`)
+
+`run_candle` can fill an entry on the bar that decided it, at its own price. The optional
+`entry_price` column (`NaN` = no price) is read only on a bar whose decision queues an entry.
+A priced entry is not queued: section D of its deciding bar opens it at exactly that price,
+sized on the capital at that point and charged its entry cost at that price. The trade is
+recorded with the deciding bar as its entry bar. The decision is still traced on that bar.
+
+- Validation runs before any bar is simulated. `entry_price` requires `open`, `high` and `low`,
+  has the series length, and holds `NaN` or finite positive values. Levels set beside an entry
+  price require `intrabar`; an entry price alone does not.
+- The price must lie within `low` and `high` of the deciding bar. Otherwise the run ends with
+  `CandleError::EntryPriceOutsideRange`, which names the bar, side, price, low and high.
+- The entry check of the protective section applies against the price. A refused entry is
+  reported in `rejected` with the price as its fill price.
+- The entry's own stop and target resolve from the bar's trade prices after its touch. The touch
+  is the first price at or beyond the entry price on the side the bar opened from: the open itself
+  when it equals the price, the first price at or below it when the bar opened above it, or the
+  first price at or above it when the bar opened below it. Prices up to and including the touch
+  are ignored, and the touching price is the entry. A bar whose range reaches none of the entry's
+  levels does not call the source. A bar with a level in range whose prices never reach the entry
+  price ends the run with `CandleError::IntrabarSource`.
+- A close queued by the same decision, such as the exit of a reversal, closes only the trades the
+  decision saw open. The priced entry stays open. Position caps count the open trades when the
+  entry is sized, so a priced entry beside a position that the queued close will exit is refused
+  when the cap has no room for both.
+- Custom intrabar exits do not run on the entry's own bar. They apply from the next bar.
+- Without `entry_price` every output is unchanged. Day-trade windows gate priced entries as they
+  gate every entry, and orders never rest beyond the deciding bar.
 
 ## Crate Responsibilities
 

@@ -56,6 +56,7 @@ fn callback_sees_filled_positions_and_preserves_static_results() {
             exit_short: close[bar],
             strength: strength[bar],
             levels: None,
+            entry_price: None,
         })
     })
     .unwrap();
@@ -155,6 +156,7 @@ fn callback_observes_intrabar_closures_and_rejected_entries() {
         protective: Some(ProtectiveColumns {
             stop_price: &[99., 101., f64::NAN],
             target_price: &[f64::NAN; 3],
+            entry_price: None,
         }),
         intrabar: Some(&Tape),
     };
