@@ -137,6 +137,7 @@ fn run<'a>(
         protective: intrabar.is_some().then_some(ProtectiveColumns {
             stop_price: &series.stop,
             target_price: &series.target,
+            entry_price: None,
         }),
         intrabar,
     };

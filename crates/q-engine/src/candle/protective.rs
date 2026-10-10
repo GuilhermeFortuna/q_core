@@ -3,6 +3,8 @@
 //! The screen and the walk use the same comparisons, so a bar that fails the screen cannot hold
 //! a fill. A stop triggers at or beyond its level; a target triggers strictly beyond it.
 
+use std::cmp::Ordering;
+
 use crate::exits::Side;
 
 use super::run::ExitReason;
@@ -12,6 +14,9 @@ use super::run::ExitReason;
 pub struct ProtectiveColumns<'a> {
     pub stop_price: &'a [f64],
     pub target_price: &'a [f64],
+    /// Fill price of an entry decided on that bar, filled on the same bar. `NaN` means no price,
+    /// so the entry queues for the next open. `None` leaves every entry queued.
+    pub entry_price: Option<&'a [f64]>,
 }
 
 /// One bar's trade prices in the order they traded.
@@ -130,12 +135,46 @@ impl Levels {
     }
 }
 
+/// Index of the trade price that touches a priced entry, or `None` when no price reaches it.
+///
+/// A bar that opens above the price trades down to it, so the touch is the first price at or
+/// below it; a bar that opens below trades up to it, so the touch is the first price at or above
+/// it. A bar that opens exactly at the price touches on its first print. A `NaN` open has no side.
+pub(crate) fn touch_index(prices: &[f64], price: f64, open: f64) -> Option<usize> {
+    match open.partial_cmp(&price)? {
+        Ordering::Greater => prices.iter().position(|&trade| trade <= price),
+        Ordering::Less => prices.iter().position(|&trade| trade >= price),
+        Ordering::Equal => (!prices.is_empty()).then_some(0),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     fn long(stop: f64, target: f64) -> Levels {
         Levels { stop, target }
+    }
+
+    #[test]
+    fn a_bar_opening_at_the_price_touches_on_its_first_print() {
+        assert_eq!(touch_index(&[100.0, 101.5], 100.0, 100.0), Some(0));
+        assert_eq!(touch_index(&[], 100.0, 100.0), None);
+    }
+
+    #[test]
+    fn a_bar_opening_below_touches_at_the_first_print_at_or_above_the_price() {
+        // Equal to the price touches on that print; one step short does not.
+        assert_eq!(touch_index(&[99.0, 101.0, 100.0], 101.0, 99.0), Some(1));
+        assert_eq!(touch_index(&[99.0, 100.5, 101.0], 101.0, 99.0), Some(2));
+        assert_eq!(touch_index(&[99.0, 100.9], 101.0, 99.0), None);
+    }
+
+    #[test]
+    fn a_bar_opening_above_touches_at_the_first_print_at_or_below_the_price() {
+        assert_eq!(touch_index(&[101.0, 99.0, 98.0], 99.0, 101.0), Some(1));
+        assert_eq!(touch_index(&[101.0, 99.5, 99.0], 99.0, 101.0), Some(2));
+        assert_eq!(touch_index(&[101.0, 99.1], 99.0, 101.0), None);
     }
 
     #[test]

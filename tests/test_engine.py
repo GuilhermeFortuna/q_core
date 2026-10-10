@@ -294,7 +294,7 @@ def bar_times(bar, count):
     return [(10 + bar) * HOUR + i * SECOND for i in range(count)]
 
 
-def protective_run(open_, high, low, entry, stop, target, intrabar):
+def protective_run(open_, high, low, entry, stop, target, intrabar, entry_price=None):
     count = len(open_)
     return engine.run_candle(
         time_us=np.array([(10 + b) * HOUR for b in range(count)], dtype=np.int64),
@@ -319,8 +319,9 @@ def protective_run(open_, high, low, entry, stop, target, intrabar):
         exit_params={},
         day_trade_us=None,
         force_close_at_end=False,
-        stop_price=np.array(stop, dtype=np.float64),
-        target_price=np.array(target, dtype=np.float64),
+        stop_price=None if stop is None else np.array(stop, dtype=np.float64),
+        target_price=None if target is None else np.array(target, dtype=np.float64),
+        entry_price=None if entry_price is None else np.array(entry_price, dtype=np.float64),
         intrabar=intrabar,
     )
 
@@ -515,12 +516,55 @@ except ValueError as exc:
 else:
     raise AssertionError("non-positive runtime level accepted")
 try:
-    callback_run(strategy_callback=lambda bar, positions: (0, False, False, 0., 1., 2., 3.),
+    callback_run(strategy_callback=lambda bar, positions: (0, False, False, 0., 1., 2., 3., 4.),
                  intrabar=tape_source({}, []))
 except TypeError as exc:
-    assert "four or six" in str(exc)
+    assert "four, six or seven" in str(exc)
 else:
-    raise AssertionError("seven-value decision accepted")
+    raise AssertionError("eight-value decision accepted")
+
+# Priced entries: the ledgers of priced_entries_gate.rs criteria 1 and 4, and the range error.
+out = protective_run(
+    [100, 100], [101, 102], [99, 99.5], [0, 1], None, None, None, entry_price=[NAN, 101],
+)
+assert out["entry_bar"].tolist() == [1], out["entry_bar"]
+assert out["entry_price"].tolist() == [101.0]
+assert out["exit_bar"].tolist() == [-1]
+assert out["entry"].tolist() == [0, 1]
+assert len(out["rejected_bar"]) == 0
+
+calls = []
+out = protective_run(
+    [99], [101.5], [99], [1], [NAN], [101], tape_source({0: [99, 100, 99.5, 101.5]}, calls),
+    entry_price=[100],
+)
+assert out["entry_price"].tolist() == [100.0]
+assert out["exit_bar"].tolist() == [0]
+assert out["exit_price"].tolist() == [101.0]
+assert out["exit_reason"].tolist() == [15]
+assert out["exit_time_us"].tolist() == [bar_times(0, 4)[3]]
+assert calls == [0], calls
+
+try:
+    protective_run([100], [101], [99], [1], None, None, None, entry_price=[102])
+except ValueError as exc:
+    assert "entry_price[0]" in str(exc) and "outside the bar range" in str(exc), str(exc)
+else:
+    raise AssertionError("priced entry above the bar range accepted")
+
+# A runtime decision carries its own price, which is range-checked like a static one.
+def priced_decision(bar, positions):
+    return (1, False, False, 1., NAN, NAN, 100.) if bar == 1 else (0, False, False, 0.)
+run = callback_run(strategy_callback=priced_decision)
+assert run["entry_bar"].tolist() == [1], run["entry_bar"]
+assert run["entry_price"].tolist() == [100.0]
+try:
+    callback_run(strategy_callback=lambda bar, positions: (1, False, False, 1., NAN, NAN, -1.)
+                 if bar == 1 else (0, False, False, 0.))
+except ValueError as exc:
+    assert "entry_price" in str(exc)
+else:
+    raise AssertionError("non-positive runtime entry price accepted")
 
 # The exit pair travels together, and each flag must be a bool.
 try:
