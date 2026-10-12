@@ -6,10 +6,136 @@
 use std::cell::RefCell;
 use std::collections::BTreeMap;
 
+use q_engine::ParamValue;
 use q_engine::{
     run_candle, CandleConfig, CandleError, CandleInputs, CandleRun, DayTradeWindow, ExitParams,
     ExitReason, IntrabarPrices, IntrabarSource, ProtectiveColumns, SignalColumns, Sizing,
 };
+
+fn breakeven_config(ticks: i64) -> CandleConfig {
+    let mut config = Scenario::config(None);
+    config.exit_params = ExitParams::from_pairs([
+        ("breakeven_trigger_pct", ParamValue::Float(0.02)),
+        ("breakeven_emergency_stop_ticks", ParamValue::Int(ticks)),
+        ("tick_size", ParamValue::Float(0.25)),
+    ])
+    .unwrap();
+    config
+}
+
+#[test]
+fn breakeven_emergency_stop_fills_before_any_gain_in_both_directions() {
+    for (side, prices, fill) in [
+        (1, vec![100.0, 99.0, 74.0], 74.0),
+        (-1, vec![100.0, 101.0, 126.0], 126.0),
+    ] {
+        let scenario =
+            Scenario::hourly(&[(100.0, 100.0, 100.0), (100.0, 126.0, 74.0)]).enter(0, side);
+        let tape = Tape::new(&[(1, &prices)]);
+        let run = scenario
+            .run_with(Some(&tape), &breakeven_config(100))
+            .unwrap();
+        assert_eq!(run.trades.exit_bar, vec![1]);
+        assert_eq!(bits(&run.trades.exit_price), bits(&[fill]));
+        assert_eq!(run.trades.exit_time_us, vec![bar_time(1) + 2 * SECOND]);
+    }
+}
+
+#[test]
+fn breakeven_arms_and_fills_in_price_order_on_the_entry_bar() {
+    let scenario = Scenario::hourly(&[(100.0, 100.0, 100.0), (100.0, 103.0, 99.0)]).enter(0, 1);
+    let tape = Tape::new(&[(1, &[100.0, 99.0, 103.0, 100.0])]);
+    let run = scenario
+        .run_with(Some(&tape), &breakeven_config(100))
+        .unwrap();
+    assert_eq!(run.trades.exit_bar, vec![1]);
+    assert_eq!(bits(&run.trades.exit_price), bits(&[100.0]));
+    assert_eq!(run.trades.exit_time_us, vec![bar_time(1) + 3 * SECOND]);
+}
+
+#[test]
+fn breakeven_does_not_use_a_later_high_to_stop_at_an_earlier_low() {
+    let scenario = Scenario::hourly(&[(100.0, 100.0, 100.0), (100.0, 103.0, 99.0)]).enter(0, 1);
+    let tape = Tape::new(&[(1, &[100.0, 99.0, 103.0, 102.0])]);
+    let run = scenario
+        .run_with(Some(&tape), &breakeven_config(100))
+        .unwrap();
+    assert_eq!(run.trades.exit_bar, vec![-1]);
+}
+
+#[test]
+fn disabling_emergency_stop_keeps_intrabar_breakeven_active() {
+    let scenario = Scenario::hourly(&[(100.0, 100.0, 100.0), (100.0, 103.0, 70.0)]).enter(0, 1);
+    let tape = Tape::new(&[(1, &[100.0, 70.0, 103.0, 100.0])]);
+    let run = scenario
+        .run_with(Some(&tape), &breakeven_config(0))
+        .unwrap();
+    assert_eq!(bits(&run.trades.exit_price), bits(&[100.0]));
+    assert_eq!(run.trades.exit_time_us, vec![bar_time(1) + 3 * SECOND]);
+}
+
+#[test]
+fn breakeven_activation_persists_and_a_later_gap_fills_at_its_first_price() {
+    for (side, activation, gap) in [(1, 103.0, 98.0), (-1, 97.0, 102.0)] {
+        let scenario =
+            Scenario::hourly(&[(100.0, 100.0, 100.0), (100.0, 103.0, 97.0), (gap, gap, gap)])
+                .enter(0, side);
+        let tape = Tape::new(&[(1, &[100.0, activation]), (2, &[gap])]);
+        let run = scenario
+            .run_with(Some(&tape), &breakeven_config(100))
+            .unwrap();
+        assert_eq!(run.trades.exit_bar, vec![2]);
+        assert_eq!(bits(&run.trades.exit_price), bits(&[gap]));
+        assert_eq!(run.trades.exit_reason, vec![6]);
+        assert_eq!(run.trades.exit_time_us, vec![bar_time(2)]);
+    }
+}
+
+#[test]
+fn emergency_stop_includes_exact_threshold_equality() {
+    let scenario = Scenario::hourly(&[(100.0, 100.0, 100.0), (100.0, 100.0, 75.0)]).enter(0, 1);
+    let tape = Tape::new(&[(1, &[100.0, 75.0])]);
+    let run = scenario
+        .run_with(Some(&tape), &breakeven_config(100))
+        .unwrap();
+    assert_eq!(run.trades.exit_reason, vec![16]);
+    assert_eq!(bits(&run.trades.exit_price), bits(&[75.0]));
+}
+
+#[test]
+fn intrabar_breakeven_rejects_missing_source_and_invalid_tick_size() {
+    let scenario = Scenario::hourly(&[(100.0, 100.0, 100.0)]);
+    let mut config = breakeven_config(100);
+    assert!(matches!(
+        scenario.run_with(None, &config),
+        Err(CandleError::InvalidConfig {
+            field: "breakeven",
+            ..
+        })
+    ));
+    let tape = Tape::new(&[]);
+    for size in [0.0, -0.25, f64::NAN, f64::INFINITY] {
+        config.exit_params.tick_size = size;
+        assert!(matches!(
+            scenario.run_with(Some(&tape), &config),
+            Err(CandleError::InvalidConfig {
+                field: "tick_size",
+                ..
+            })
+        ));
+    }
+}
+
+#[test]
+fn disabling_breakeven_disables_its_emergency_stop_and_tick_reads() {
+    let scenario = Scenario::hourly(&[(100.0, 100.0, 100.0), (100.0, 100.0, 10.0)]).enter(0, 1);
+    let mut config = breakeven_config(100);
+    config.exit_params.breakeven_trigger_pct = 0.0;
+    let tape = Tape::new(&[]);
+    let run = scenario.run_with(Some(&tape), &config).unwrap();
+    assert_eq!(run.trades.exit_bar, vec![-1]);
+    assert!(tape.calls.borrow().is_empty());
+}
 
 const HOUR: i64 = 3_600_000_000;
 const SECOND: i64 = 1_000_000;

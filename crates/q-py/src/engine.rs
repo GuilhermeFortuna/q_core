@@ -250,6 +250,7 @@ fn exit_reason_text(code: i64) -> Option<&'static str> {
         13 => "FORCE_CLOSE",
         14 => "STOP_LOSS",
         15 => "TAKE_PROFIT",
+        16 => "breakeven_emergency",
         _ => return None,
     })
 }
@@ -1379,6 +1380,7 @@ pub(crate) fn register(parent: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(resolve_bar_ms, &m)?)?;
     m.add_function(wrap_pyfunction!(sample_at_bar_ends, &m)?)?;
     m.add("PROTECTIVE_ORDERS", true)?;
+    m.add("BREAKEVEN_INTRABAR", true)?;
     parent.add_submodule(&m)?;
     parent
         .py()

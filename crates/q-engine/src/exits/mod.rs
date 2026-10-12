@@ -33,6 +33,7 @@
 //!   unless the right strictly compares).
 
 pub mod book;
+pub(crate) mod breakeven;
 pub(crate) mod logic;
 pub mod params;
 pub(crate) mod pyops;

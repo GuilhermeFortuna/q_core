@@ -1,5 +1,6 @@
 //! The candle bar loop: `BacktestEngine._run_single_chunk` over columns.
 
+use crate::exits::breakeven::BreakevenStop;
 use crate::exits::{ExitInputs, ExitRuleId, ExitRuleSet, PositionKey, Side};
 
 use super::decision::{Decision, DecisionStep, QueuedEntry, TradeView};
@@ -21,6 +22,8 @@ pub enum ExitReason {
     StopLoss,
     /// An intrabar target level was traded through.
     TakeProfit,
+    /// The pre-activation breakeven emergency stop was reached intrabar.
+    BreakevenEmergency,
 }
 
 impl ExitReason {
@@ -32,6 +35,7 @@ impl ExitReason {
             Self::ForceClose => 13,
             Self::StopLoss => 14,
             Self::TakeProfit => 15,
+            Self::BreakevenEmergency => 16,
         }
     }
 
@@ -43,6 +47,7 @@ impl ExitReason {
             Self::ForceClose => "FORCE_CLOSE",
             Self::StopLoss => "STOP_LOSS",
             Self::TakeProfit => "TAKE_PROFIT",
+            Self::BreakevenEmergency => "breakeven_emergency",
         }
     }
 }
@@ -63,7 +68,7 @@ pub struct TradeLedger {
     pub pnl: Vec<f64>,
     /// [`ExitReason::code`], `-1` = still open.
     pub exit_reason: Vec<i64>,
-    /// Time of the price that triggered an intrabar stop or target; `-1` for every other exit.
+    /// Time of the price that triggered an intrabar exit; `-1` for closed-bar exits.
     pub exit_time_us: Vec<i64>,
 }
 
@@ -104,6 +109,7 @@ struct Trade {
     exit_reason: i64,
     levels: Levels,
     exit_time_us: i64,
+    breakeven: BreakevenStop,
 }
 
 /// `TradeRegistry.close_trade` plus `_close_trade_with_costs`: charge the exit side, then
@@ -345,7 +351,11 @@ where
     let exit_inputs =
         ExitInputs::from_slices(close_for_exits, inputs.high, inputs.low, &lookup, &rules)
             .map_err(CandleError::Exit)?;
-    let mut step = DecisionStep::new(config.exit_params.clone());
+    let mut closed_bar_params = config.exit_params.clone();
+    if closed_bar_params.intrabar_breakeven() {
+        closed_bar_params.breakeven_trigger_pct = 0.0;
+    }
+    let mut step = DecisionStep::new(closed_bar_params);
 
     let mut trades: Vec<Trade> = Vec::new();
     let mut capital = config.initial_capital;
@@ -569,12 +579,7 @@ fn intrabar_fills<E: From<CandleError>>(
     };
     let reached: Vec<bool> = trades
         .iter()
-        .map(|trade| {
-            trade.open
-                && trade
-                    .levels
-                    .reached_by_range(trade.side, high[bar], low[bar])
-        })
+        .map(|trade| trade.open && reached_by_range(trade, high[bar], low[bar], config))
         .collect();
     if !screened && !reached.contains(&true) {
         return Ok(());
@@ -589,7 +594,7 @@ fn intrabar_fills<E: From<CandleError>>(
             if !trade.open || !reached[index] || opened_on_tick(trade) {
                 continue;
             }
-            let Some((reason, fill)) = trade.levels.trigger(trade.side, price) else {
+            let Some((reason, fill)) = trigger_price(trade, price, config) else {
                 continue;
             };
             let pnl = close_trade(trade, bar, fill, reason, config);
@@ -615,6 +620,40 @@ fn intrabar_fills<E: From<CandleError>>(
         }
     }
     Ok(())
+}
+
+fn reached_by_range(trade: &Trade, high: f64, low: f64, config: &CandleConfig) -> bool {
+    trade.levels.reached_by_range(trade.side, high, low)
+        || trade.breakeven.reached_by_range(
+            trade.side,
+            trade.entry_price,
+            high,
+            low,
+            &config.exit_params,
+        )
+}
+
+fn trigger_price(
+    trade: &mut Trade,
+    price: f64,
+    config: &CandleConfig,
+) -> Option<(ExitReason, f64)> {
+    // Explicit protective orders retain precedence when both stops fire on the same print.
+    trade.levels.trigger(trade.side, price).or_else(|| {
+        trade
+            .breakeven
+            .on_price(trade.side, trade.entry_price, price, &config.exit_params)
+            .map(|emergency| {
+                (
+                    if emergency {
+                        ExitReason::BreakevenEmergency
+                    } else {
+                        ExitReason::Rule(ExitRuleId::Breakeven)
+                    },
+                    price,
+                )
+            })
+    })
 }
 
 /// A bar's trade prices from the source. The source must return a price and one time per price.
@@ -719,10 +758,7 @@ fn resolve_entry_levels<E: From<CandleError>>(
     else {
         return Ok(());
     };
-    if !trade
-        .levels
-        .reached_by_range(trade.side, high[bar], low[bar])
-    {
+    if !reached_by_range(trade, high[bar], low[bar], config) {
         return Ok(());
     }
 
@@ -743,10 +779,7 @@ fn resolve_entry_levels<E: From<CandleError>>(
         .zip(&prices.price)
         .skip(touch + 1)
         .find_map(|(&time_us, &price)| {
-            trade
-                .levels
-                .trigger(trade.side, price)
-                .map(|(reason, fill)| (time_us, reason, fill))
+            trigger_price(trade, price, config).map(|(reason, fill)| (time_us, reason, fill))
         });
     if let Some((time_us, reason, fill)) = exit {
         let pnl = close_trade(trade, bar, fill, reason, config);
@@ -828,6 +861,7 @@ fn open_entry(
         exit_reason: -1,
         levels,
         exit_time_us: -1,
+        breakeven: BreakevenStop::default(),
     });
 }
 
@@ -942,6 +976,39 @@ fn check_level(column: &'static str, bar: usize, level: f64) -> Result<(), Candl
 
 fn validate(inputs: &CandleInputs<'_>, config: &CandleConfig) -> Result<(), CandleError> {
     config.sizing.validate()?;
+    let params = &config.exit_params;
+    if params.intrabar_breakeven() {
+        if !intrabar_ready(inputs) {
+            return Err(CandleError::InvalidConfig {
+                field: "breakeven",
+                reason: "requires intrabar, open, high and low".to_string(),
+            });
+        }
+        if !params.breakeven_trigger_pct.is_finite()
+            || !params.breakeven_offset_pct.is_finite()
+            || params.breakeven_offset_pct < 0.0
+            || params.breakeven_offset_pct >= params.breakeven_trigger_pct
+        {
+            return Err(CandleError::InvalidConfig {
+                field: "breakeven_offset_pct",
+                reason: "must be finite, nonnegative and below the finite activation threshold"
+                    .to_string(),
+            });
+        }
+        if params.breakeven_emergency_stop_ticks.unwrap_or(0) > 0
+            && (!params.tick_size.is_finite()
+                || params.tick_size <= 0.0
+                || !(params.breakeven_emergency_stop_ticks.unwrap_or(0) as f64 * params.tick_size)
+                    .is_finite())
+        {
+            return Err(CandleError::InvalidConfig {
+                field: "tick_size",
+                reason:
+                    "emergency stop requires a finite positive instrument tick size and distance"
+                        .to_string(),
+            });
+        }
+    }
 
     let n = inputs.time_us.len();
     let check = |column: &str, actual: usize| -> Result<(), CandleError> {

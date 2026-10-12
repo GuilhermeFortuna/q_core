@@ -127,6 +127,28 @@ recorded with the deciding bar as its entry bar. The decision is still traced on
 
 ## Crate Responsibilities
 
+### Intrabar Breakeven Stop
+
+For `run_candle`, an enabled `breakeven_trigger_pct` together with
+`breakeven_emergency_stop_ticks` selects tick-ordered breakeven execution. The backend
+supplies **100 ticks** by default; `0` disables the emergency stop while keeping intrabar
+activation and breakeven fills. A positive emergency distance also requires a finite positive
+instrument `tick_size`. It is a price increment, independent of financial `point_value`.
+
+Before activation the stop is entry minus ticks × tick size for a long, or entry plus that
+distance for a short. The first trade price reaching the favorable percentage threshold arms
+breakeven, replacing the emergency stop with entry ± `breakeven_offset_pct`. Each stop fills
+at the first observed trade price at or beyond it, with the tick timestamp and reason
+`breakeven_emergency` or `breakeven`. Gaps can exceed the stop level. Activation is never
+inferred from a later candle extreme. Priced entries ignore prices before and at their entry
+touch; queued entries start protection after their opening print. Explicit protective orders
+take precedence at a shared tick, followed by breakeven, then custom intrabar exits.
+
+An intrabar source and open/high/low columns are mandatory in this mode. Source failures abort
+the run. Omitting the new emergency parameter from a low-level call retains the historical
+bar-based ABI for archived parity fixtures; current backend runs always supply it for an
+enabled breakeven rule. The Python binding advertises `engine.BREAKEVEN_INTRABAR`.
+
 Every responsibility named in §5 of the system architecture is mapped to exactly one crate:
 
 | Crate | Responsibility | Role & Boundary |

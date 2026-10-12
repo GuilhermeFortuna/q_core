@@ -54,6 +54,10 @@ pub struct ExitParams {
     pub chandelier_atr_mult: f64,
     pub breakeven_trigger_pct: f64,
     pub breakeven_offset_pct: f64,
+    /// Presence opts into tick-ordered candle execution; absent legacy inputs retain parity.
+    pub breakeven_emergency_stop_ticks: Option<i64>,
+    /// Instrument price increment supplied by the host.
+    pub tick_size: f64,
     pub psar_af_start: f64,
     pub psar_af_step: f64,
     pub psar_af_max: f64,
@@ -74,6 +78,8 @@ impl Default for ExitParams {
             chandelier_atr_mult: 0.0,
             breakeven_trigger_pct: 0.0,
             breakeven_offset_pct: 0.0,
+            breakeven_emergency_stop_ticks: None,
+            tick_size: 0.0,
             psar_af_start: 0.0,
             psar_af_step: 0.02,
             psar_af_max: 0.2,
@@ -101,6 +107,18 @@ impl ExitParams {
                 "chandelier_atr_mult" => p.chandelier_atr_mult = value.to_float(),
                 "breakeven_trigger_pct" => p.breakeven_trigger_pct = value.to_float(),
                 "breakeven_offset_pct" => p.breakeven_offset_pct = value.to_float(),
+                "breakeven_emergency_stop_ticks" => {
+                    let ticks = value.to_float();
+                    if !ticks.is_finite() || ticks < 0.0 || ticks.fract().abs() > 0.0 {
+                        return Err(ExitError::InvalidParameter {
+                            name: "breakeven_emergency_stop_ticks",
+                            reason: "must be a finite nonnegative integer",
+                        });
+                    }
+                    p.breakeven_emergency_stop_ticks =
+                        Some(value.to_int("breakeven_emergency_stop_ticks")?);
+                }
+                "tick_size" => p.tick_size = value.to_float(),
                 "psar_af_start" => p.psar_af_start = value.to_float(),
                 "psar_af_step" => p.psar_af_step = value.to_float(),
                 "psar_af_max" => p.psar_af_max = value.to_float(),
@@ -115,6 +133,10 @@ impl ExitParams {
             }
         }
         Ok(p)
+    }
+
+    pub fn intrabar_breakeven(&self) -> bool {
+        self.breakeven_trigger_pct > 0.0 && self.breakeven_emergency_stop_ticks.is_some()
     }
 }
 

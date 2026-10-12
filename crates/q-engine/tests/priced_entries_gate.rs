@@ -133,6 +133,14 @@ impl Scenario {
         intrabar: &dyn IntrabarSource,
         sizing: Sizing,
     ) -> Result<CandleRun, CandleError> {
+        self.run_config(intrabar, &config(sizing))
+    }
+
+    fn run_config(
+        &self,
+        intrabar: &dyn IntrabarSource,
+        config: &CandleConfig,
+    ) -> Result<CandleRun, CandleError> {
         let n = self.time_us.len();
         let no_exit = vec![false; n];
         let no_columns = |_: &str| None;
@@ -159,8 +167,28 @@ impl Scenario {
             }),
             intrabar: Some(intrabar),
         };
-        run_candle(&inputs, &config(sizing))
+        run_candle(&inputs, config)
     }
+}
+
+#[test]
+fn priced_entry_breakeven_ignores_prices_before_and_at_its_touch() {
+    let scenario = Scenario::hourly(&[(95.0, 105.0, 95.0)]).enter(0, 1, 100.0);
+    let tape = Tape::new(&[(0, &[95.0, 105.0, 100.0, 98.0])]);
+    let mut config = config(fixed_quantity());
+    config.exit_params = ExitParams::from_pairs([
+        ("breakeven_trigger_pct", q_engine::ParamValue::Float(0.02)),
+        (
+            "breakeven_emergency_stop_ticks",
+            q_engine::ParamValue::Int(4),
+        ),
+        ("tick_size", q_engine::ParamValue::Float(0.25)),
+    ])
+    .unwrap();
+    let run = scenario.run_config(&tape, &config).unwrap();
+    assert_eq!(run.trades.exit_bar, vec![0]);
+    assert_eq!(bits(&run.trades.exit_price), bits(&[98.0]));
+    assert_eq!(run.trades.exit_reason, vec![16]);
 }
 
 fn fixed_quantity() -> Sizing {
