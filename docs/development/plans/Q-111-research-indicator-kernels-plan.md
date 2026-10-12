@@ -20,11 +20,11 @@
 
 ## Ordered implementation
 
-- [ ] 1. Add `crates/q-indicators/tests/research_kernels.rs` with criteria 1 to 9 and 12. Confirm it fails for the expected reason.
-- [ ] 2. Add `crates/q-indicators/src/research.rs`: a shared log-close helper that maps invalid prices to NaN, the half-life recursion with its `N_EW` readiness and restart, then the kernels of the spec table. Export them from `lib.rs`. Run the test file; commit.
-- [ ] 3. Add `crates/q-indicators/tests/quote_spread.rs` with criteria 10 and 11, then `crates/q-indicators/src/quotes.rs` with `quote_spread_bars` as a single pass over ticks and bars. Commit.
-- [ ] 4. Project every kernel in `crates/q-py/src/indicators.rs` and register it. Add cases to `tests/test_wheel.py` for criterion 13.
-- [ ] 5. Document the conventions, the kernel table and the quote rules in `README.md`. Run `make check`. Commit.
+- [x] 1. Add `crates/q-indicators/tests/research_kernels.rs` with criteria 1 to 9 and 12. Confirm it fails for the expected reason.
+- [x] 2. Add `crates/q-indicators/src/research.rs`: a shared log-close helper that maps invalid prices to NaN, the half-life recursion with its `N_EW` readiness and restart, then the kernels of the spec table. Export them from `lib.rs`. Run the test file; commit.
+- [x] 3. Add `crates/q-indicators/tests/quote_spread.rs` with criteria 10 and 11, then `crates/q-indicators/src/quotes.rs` with `quote_spread_bars` as a single pass over ticks and bars. Commit.
+- [x] 4. Project every kernel in `crates/q-py/src/indicators.rs` and register it. Add cases to `tests/test_wheel.py` for criterion 13.
+- [x] 5. Document the conventions, the kernel table and the quote rules in `README.md`. Run `make check`. Commit.
 
 ## Review focus
 
