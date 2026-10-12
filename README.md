@@ -195,6 +195,28 @@ q-parity      ───►  (none)
 
 ---
 
+## Research indicator kernels (`q-indicators`)
+
+Batch kernels for research features live beside the pandas-parity set. They take `&[f64]` columns (plus `int64` tick metadata for quotes) and return `Vec<f64>` of the same length; NaN is the only missing value. Natural logarithms require finite, strictly positive prices. Per-bar volatility is in log-return units and is never annualized; `yang_zhang(..., periods_per_year = 1)` is the per-bar Yang–Zhang estimator. Volatility at or below `1e-12` is a valid output and an invalid denominator for quotients. Half-life `H` uses `lambda = exp(-ln 2 / H)`; exponentially weighted kernels seed on the first valid input and stay NaN until `N_EW(H) = 1 + ceil(H * log2(100))` samples have been seen, then restart after any invalid price.
+
+| Kernel | Role |
+| --- | --- |
+| `log_return` | `ln(C_t) - ln(C_{t-h})` |
+| `realized_vol_per_bar` | `sqrt(mean(r^2))` over a trailing window (mean not removed) |
+| `ewma_vol_per_bar` | `sqrt` of EWMA of squared log returns |
+| `rogers_satchell` | Rogers–Satchell range estimator per bar |
+| `true_range` | Classic true range from high, low, and previous close |
+| `atr_fraction` | `atr / close` |
+| `price_zscore_log` | Z-score of log closes (sample std, `ddof = 1`) |
+| `ewma_trend_spread` | Fast minus slow EWMA of log closes (`fast < slow`) |
+| `vol_normalize` | `values / (sigma * sqrt(horizon))` with `vol_lag` 0 or 1 |
+| `volatility_log_ratio` | `ln(sigma_short) - ln(sigma_long)` |
+| `quote_spread_bars` | Relative bid–ask spread aggregated to `[open, close)` bars |
+
+`quote_spread_bars(time_msc, bid, ask, flags, session, bar_open_msc, bar_close_msc, max_quote_age_ms)` returns `(last, time_weighted_mean, max, coverage)`. Spread is `(ask - bid) / mid`. Quote updates are ticks whose MQL5 flags include bid (`2`) or ask (`4`). A quote is valid when `0 < bid <= ask`; invalid updates clear the carry. A valid quote is carried until the next quote update, a session change on a tick, or `max_quote_age_ms` after its update (expiry needs no tick). `time_weighted_mean` and `max` weight positive-duration intervals inside each bar; `coverage` is carried duration divided by bar length. Ticks at a bar’s close belong to the next bar. Python exposes every kernel under `q_core.indicators`.
+
+---
+
 ## Market Context Analysis (`q-indicators::context`)
 
 `q-indicators::context` exposes deterministic, inspectable market-context evaluations by composing streaming price studies (`EmaState`, `RsiState`, `AtrState`, `SmaState`, and `SessionVwapState`). It provides both incremental state evaluation (`ContextState`) and slice evaluation (`batch_context`).

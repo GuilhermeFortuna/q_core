@@ -9,6 +9,8 @@ mod error;
 mod ieee;
 mod indicators;
 mod moving_averages;
+mod quotes;
+mod research;
 mod streaming;
 mod transforms;
 pub mod volume;
@@ -20,6 +22,8 @@ pub use context::*;
 pub use error::IndicatorError;
 pub use indicators::*;
 pub use moving_averages::*;
+pub use quotes::*;
+pub use research::*;
 pub use streaming::*;
 pub use transforms::*;
 pub use volume::{

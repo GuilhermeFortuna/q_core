@@ -52,6 +52,9 @@ names = [
     "realized_vol", "yang_zhang", "rsi", "bollinger_bands", "macd",
     "donchian_channels", "atr", "sma", "ema", "smma", "wma", "hma",
     "rolling_zscore", "rolling_rank", "pct_change", "clip",
+    "log_return", "realized_vol_per_bar", "ewma_vol_per_bar", "rogers_satchell",
+    "true_range", "atr_fraction", "price_zscore_log", "ewma_trend_spread",
+    "vol_normalize", "volatility_log_ratio", "quote_spread_bars",
 ]
 for name in names:
     assert hasattr(qi, name), f"missing q_core.indicators.{{name}}"
@@ -97,6 +100,33 @@ except ValueError:
     pass
 else:
     raise AssertionError("non-contiguous input must raise ValueError")
+
+prev = 99.0
+o = np.array([prev, 100.0, 103.0, 104.0], dtype=np.float64)
+h = np.array([prev, 102.0, 106.0, 105.0], dtype=np.float64)
+l = np.array([prev, 98.0, 102.0, 101.0], dtype=np.float64)
+c = np.array([prev, 101.0, 105.0, 102.0], dtype=np.float64)
+rs = qi.rogers_satchell(o[1:], h[1:], l[1:], c[1:], 3)
+assert abs(rs[2] - 0.02533109341314) < 1e-12
+try:
+    qi.log_return(c, 0)
+except ValueError as e:
+    assert "horizon" in str(e)
+else:
+    raise AssertionError("log_return invalid horizon must raise ValueError")
+
+time = np.array([0], dtype=np.int64)
+bid = np.array([99.9], dtype=np.float64)
+ask = np.array([100.1], dtype=np.float64)
+flags = np.array([6], dtype=np.int64)
+session = np.array([1], dtype=np.int64)
+bar_open = np.array([0], dtype=np.int64)
+bar_close = np.array([60_000], dtype=np.int64)
+spread = qi.quote_spread_bars(
+    time, bid, ask, flags, session, bar_open, bar_close, 60_000
+)
+assert isinstance(spread, tuple) and len(spread) == 4
+assert abs(spread[0][0] - 0.002) < 1e-12
 
 print("indicator projection checks passed")
 """
