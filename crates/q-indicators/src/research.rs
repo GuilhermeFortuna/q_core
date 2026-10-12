@@ -4,6 +4,8 @@ use crate::elementwise::shift;
 use crate::error::IndicatorError;
 use crate::indicators::atr;
 const VOL_EPS: f64 = 1e-12;
+/// Largest half-life whose readiness count `N_EW` still fits 32 bits.
+const MAX_HALF_LIFE: f64 = 5e8;
 
 fn log_close(price: f64) -> f64 {
     if price.is_finite() && price > 0.0 {
@@ -41,6 +43,14 @@ fn validate_half_life(function: &'static str, half_life: f64) -> Result<(), Indi
             parameter: "half_life",
             value: half_life,
             requirement: "finite and > 0",
+        });
+    }
+    if half_life > MAX_HALF_LIFE {
+        return Err(IndicatorError::InvalidInput {
+            function,
+            parameter: "half_life",
+            value: half_life,
+            requirement: "<= 5e8",
         });
     }
     Ok(())

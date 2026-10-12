@@ -27,6 +27,42 @@ fn length_mismatch(
     }
 }
 
+struct Carried {
+    spread: f64,
+    session: i64,
+    expiry_msc: i64,
+}
+
+/// Drops a quote whose expiry lies before `now_msc`. A quote adds duration over
+/// `[update, expiry)` and is still readable as `last` at the expiry instant itself.
+fn drop_expired(carried: &mut Option<Carried>, now_msc: i64) {
+    if carried.as_ref().is_some_and(|c| c.expiry_msc < now_msc) {
+        *carried = None;
+    }
+}
+
+fn apply_tick(
+    carried: &mut Option<Carried>,
+    time_msc: i64,
+    bid: f64,
+    ask: f64,
+    flags: i64,
+    session: i64,
+    max_quote_age_ms: i64,
+) {
+    if carried.as_ref().is_some_and(|c| c.session != session) {
+        *carried = None;
+    }
+    if flags & (MQL5_BID_FLAG | MQL5_ASK_FLAG) == 0 {
+        return;
+    }
+    *carried = relative_spread(bid, ask).map(|spread| Carried {
+        spread,
+        session,
+        expiry_msc: time_msc.saturating_add(max_quote_age_ms),
+    });
+}
+
 /// Bar-aggregated quote spread statistics.
 #[derive(Debug, Clone, PartialEq)]
 pub struct QuoteSpreadBars {
@@ -85,21 +121,31 @@ pub fn quote_spread_bars(
     let mut max_out = vec![f64::NAN; n_bars];
     let mut coverage = vec![0.0; n_bars];
 
-    struct Carried {
-        spread: f64,
-        session: i64,
-        expiry_msc: i64,
-    }
-
     let mut carried: Option<Carried> = None;
     let mut tick_idx = 0usize;
 
     for bar_i in 0..n_bars {
         let bar_open = bar_open_msc[bar_i];
         let bar_close = bar_close_msc[bar_i];
-        let bar_len = bar_close - bar_open;
+
+        // Ticks before the bar only update the carried quote; they add no duration.
+        while tick_idx < n_ticks && time_msc[tick_idx] < bar_open {
+            apply_tick(
+                &mut carried,
+                time_msc[tick_idx],
+                bid[tick_idx],
+                ask[tick_idx],
+                flags[tick_idx],
+                session[tick_idx],
+                max_quote_age_ms,
+            );
+            tick_idx += 1;
+        }
+        drop_expired(&mut carried, bar_open);
+
+        let bar_len = bar_close.saturating_sub(bar_open);
         if bar_len <= 0 {
-            last[bar_i] = carried.as_ref().map(|c| c.spread).unwrap_or(f64::NAN);
+            last[bar_i] = carried.as_ref().map_or(f64::NAN, |c| c.spread);
             continue;
         }
 
@@ -108,72 +154,51 @@ pub fn quote_spread_bars(
         let mut covered = 0i64;
         let mut max_spread = f64::NAN;
 
-        while t < bar_close {
-            let next_expiry = carried.as_ref().map(|c| c.expiry_msc).unwrap_or(i64::MAX);
+        loop {
+            let next_expiry = carried.as_ref().map_or(i64::MAX, |c| c.expiry_msc);
+            // A tick is never applied before the cursor, so time only moves forward.
             let next_tick = if tick_idx < n_ticks {
-                time_msc[tick_idx]
+                time_msc[tick_idx].max(t)
             } else {
                 i64::MAX
             };
-            let next_event = next_expiry.min(next_tick).min(bar_close);
+            let next_event = next_expiry.min(next_tick).min(bar_close).max(t);
 
             if let Some(c) = &carried {
-                if next_event > t {
-                    let dt = next_event - t;
-                    let spread = c.spread;
+                let dt = next_event - t;
+                if dt > 0 {
                     #[expect(
                         clippy::suboptimal_flops,
                         reason = "duration weighting must not use fused multiply-add"
                     )]
                     {
-                        weighted_sum += spread * (dt as f64);
+                        weighted_sum += c.spread * (dt as f64);
                     }
                     covered += dt;
-                    if dt > 0 && (max_spread.is_nan() || spread > max_spread) {
-                        max_spread = spread;
+                    if max_spread.is_nan() || c.spread > max_spread {
+                        max_spread = c.spread;
                     }
                 }
             }
             t = next_event;
-
-            if next_event >= bar_close {
+            if t >= bar_close {
                 break;
             }
-
-            if carried.is_some() && next_event == next_expiry && next_tick != next_expiry {
+            if next_expiry <= t {
                 carried = None;
-                continue;
             }
 
-            if tick_idx < n_ticks && next_event == next_tick {
-                let tick_time = time_msc[tick_idx];
-                let tick_session = session[tick_idx];
-                let tick_flags = flags[tick_idx];
-                let is_quote =
-                    (tick_flags & MQL5_BID_FLAG != 0) || (tick_flags & MQL5_ASK_FLAG != 0);
-
-                if let Some(c) = &carried {
-                    if tick_session != c.session {
-                        carried = None;
-                    }
-                }
-
-                if is_quote {
-                    let b = bid[tick_idx];
-                    let a = ask[tick_idx];
-                    match relative_spread(b, a) {
-                        Some(spread) => {
-                            carried = Some(Carried {
-                                spread,
-                                session: tick_session,
-                                expiry_msc: tick_time + max_quote_age_ms,
-                            });
-                        }
-                        None => {
-                            carried = None;
-                        }
-                    }
-                }
+            // Equal-time ticks apply in source order; the last one defines the quote.
+            while tick_idx < n_ticks && time_msc[tick_idx] <= t {
+                apply_tick(
+                    &mut carried,
+                    t,
+                    bid[tick_idx],
+                    ask[tick_idx],
+                    flags[tick_idx],
+                    session[tick_idx],
+                    max_quote_age_ms,
+                );
                 tick_idx += 1;
             }
         }
@@ -182,12 +207,9 @@ pub fn quote_spread_bars(
             time_weighted_mean[bar_i] = weighted_sum / (covered as f64);
             max_out[bar_i] = max_spread;
             coverage[bar_i] = (covered as f64) / (bar_len as f64);
-        } else {
-            time_weighted_mean[bar_i] = f64::NAN;
-            max_out[bar_i] = f64::NAN;
-            coverage[bar_i] = 0.0;
         }
-        last[bar_i] = carried.as_ref().map(|c| c.spread).unwrap_or(f64::NAN);
+        drop_expired(&mut carried, bar_close);
+        last[bar_i] = carried.as_ref().map_or(f64::NAN, |c| c.spread);
     }
 
     Ok(QuoteSpreadBars {

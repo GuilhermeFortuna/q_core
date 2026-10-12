@@ -90,11 +90,6 @@ fn criterion_2_realized_vol_per_bar() {
 
 #[test]
 fn criterion_3_ewma_vol_per_bar() {
-    let mut close = vec![100.0];
-    close.push(100.0 * (0.01f64).exp());
-    close.push(close[1] * (0.02f64).exp());
-    // Internal variance after two returns is verified in `research` unit tests.
-
     let long: Vec<f64> = (0..300)
         .map(|i| {
             #[expect(
@@ -110,8 +105,54 @@ fn criterion_3_ewma_vol_per_bar() {
     for (i, v) in ew.iter().enumerate().take(214) {
         assert!(v.is_nan(), "index {i} should be NaN before 214");
     }
-    let manual = ewma_vol_per_bar(&long[..215], 32.0).unwrap();
-    assert_eq!(ew[214].to_bits(), manual[214].to_bits());
+    // Plain recurrence over squared log returns, seeded with the first one.
+    let lambda = (-std::f64::consts::LN_2 / 32.0).exp();
+    let mut v = f64::NAN;
+    for i in 1..long.len() {
+        let r = long[i].ln() - long[i - 1].ln();
+        #[expect(
+            clippy::suboptimal_flops,
+            reason = "reference recurrence must not use fused multiply-add"
+        )]
+        {
+            v = if i == 1 {
+                r * r
+            } else {
+                lambda * v + (1.0 - lambda) * (r * r)
+            };
+        }
+        if i >= 214 {
+            assert_eq!(ew[i].to_bits(), v.sqrt().to_bits(), "index {i}");
+        }
+    }
+
+    // H = 1: lambda = 0.5, so returns 0.01 then 0.02 leave v = 0.00025; first output at N_EW(1) = 8.
+    let mut short = vec![100.0, 100.0 * (0.01f64).exp()];
+    short.push(short[1] * (0.02f64).exp());
+    for _ in 0..6 {
+        short.push(*short.last().unwrap());
+    }
+    let out = ewma_vol_per_bar(&short, 1.0).unwrap();
+    assert!(out[..8].iter().all(|x| x.is_nan()));
+    assert_close(
+        out[8],
+        (0.00025f64 / 64.0).sqrt(),
+        "H=1 state decayed over six flat bars",
+    );
+
+    for too_large in [1e300, 5.000_001e8] {
+        assert!(matches!(
+            ewma_vol_per_bar(&long, too_large),
+            Err(IndicatorError::InvalidInput {
+                parameter: "half_life",
+                ..
+            })
+        ));
+    }
+    assert!(ewma_vol_per_bar(&long, 5e8)
+        .unwrap()
+        .iter()
+        .all(|x| x.is_nan()));
 }
 
 #[test]
