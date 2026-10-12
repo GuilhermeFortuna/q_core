@@ -108,6 +108,8 @@ l = np.array([prev, 98.0, 102.0, 101.0], dtype=np.float64)
 c = np.array([prev, 101.0, 105.0, 102.0], dtype=np.float64)
 rs = qi.rogers_satchell(o[1:], h[1:], l[1:], c[1:], 3)
 assert abs(rs[2] - 0.02533109341314) < 1e-12
+yz = qi.yang_zhang(o, h, l, c, 3, 1)
+assert abs(yz[3] - 0.02896649184455) < 1e-12
 try:
     qi.log_return(c, 0)
 except ValueError as e:
@@ -127,6 +129,24 @@ spread = qi.quote_spread_bars(
 )
 assert isinstance(spread, tuple) and len(spread) == 4
 assert abs(spread[0][0] - 0.002) < 1e-12
+
+# Ten seconds at 10 bps, then fifty at 20 bps, in one 60-second bar.
+last, mean, peak, coverage = qi.quote_spread_bars(
+    np.array([0, 10_000], dtype=np.int64),
+    np.array([99.95, 99.9], dtype=np.float64),
+    np.array([100.05, 100.1], dtype=np.float64),
+    np.array([6, 6], dtype=np.int64),
+    np.array([1, 1], dtype=np.int64),
+    bar_open, bar_close, 120_000,
+)
+assert abs(mean[0] * 1e4 - (10 * 10 + 50 * 20) / 60) < 1e-9
+assert abs(peak[0] * 1e4 - 20) < 1e-9 and coverage[0] == 1.0
+
+# A quote before the bar counts only from the bar's open.
+carry = qi.quote_spread_bars(
+    np.array([-30_000], dtype=np.int64), bid, ask, flags, session, bar_open, bar_close, 120_000
+)
+assert carry[3][0] == 1.0
 
 print("indicator projection checks passed")
 """
