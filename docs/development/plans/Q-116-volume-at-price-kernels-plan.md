@@ -21,11 +21,11 @@
 
 ## Ordered implementation
 
-- [ ] 1. Add `crates/q-indicators/tests/volume_at_price.rs` with criteria 1 to 8. Confirm it fails for the expected reason.
-- [ ] 2. Add `crates/q-indicators/src/vap.rs`: input validation, the trade rule and row binning, a per-profile row accumulator, and one `poc_and_value_area` function shared by both kernels. Implement `volume_at_price` as one pass over ticks and segments. Export from `lib.rs`. Commit.
-- [ ] 3. Implement `volume_at_price_levels` on the same accumulator, resetting on session change and evaluating each checkpoint before applying ticks at or after it. Commit.
-- [ ] 4. Project both kernels in `crates/q-py/src/indicators.rs` and register them. Add cases to `tests/test_wheel.py` for criterion 9. Commit.
-- [ ] 5. Document the row grid, trade rule, POC tie-break and value-area expansion in `README.md`. Run `make check`. Commit.
+- [x] 1. Add `crates/q-indicators/tests/volume_at_price.rs` with criteria 1 to 8. Confirm it fails for the expected reason.
+- [x] 2. Add `crates/q-indicators/src/vap.rs`: input validation, the trade rule and row binning, a per-profile row accumulator, and one `poc_and_value_area` function shared by both kernels. Implement `volume_at_price` as one pass over ticks and segments. Export from `lib.rs`. Commit.
+- [x] 3. Implement `volume_at_price_levels` on the same accumulator, resetting on session change and evaluating each checkpoint before applying ticks at or after it. Commit.
+- [x] 4. Project both kernels in `crates/q-py/src/indicators.rs` and register them. Add cases to `tests/test_wheel.py` for criterion 9. Commit.
+- [x] 5. Document the row grid, trade rule, POC tie-break and value-area expansion in `README.md`. Run `make check`. Commit.
 
 ## Review focus
 

@@ -13,6 +13,7 @@ mod quotes;
 mod research;
 mod streaming;
 mod transforms;
+mod vap;
 pub mod volume;
 mod window;
 
@@ -26,6 +27,10 @@ pub use quotes::*;
 pub use research::*;
 pub use streaming::*;
 pub use transforms::*;
+pub use vap::{
+    volume_at_price, volume_at_price_levels, VolumeAtPriceLevels, VolumeAtPriceOutput,
+    VolumeAtPriceRows, VolumeAtPriceSegments,
+};
 pub use volume::{
     batch_volume, AggressorSide, LargePrint, TradeInput, VolumeConfig, VolumeError, VolumeOutput,
     VolumeState, BUY_FLAG, MAX_RATE_EVENTS, SELL_FLAG,
