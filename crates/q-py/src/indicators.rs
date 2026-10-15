@@ -2,7 +2,7 @@
 
 use numpy::{PyArray1, PyReadonlyArray1};
 use pyo3::prelude::*;
-use pyo3::types::PyModule;
+use pyo3::types::{PyDict, PyModule};
 use pyo3::Bound;
 use q_indicators::IndicatorError;
 
@@ -38,6 +38,62 @@ fn indicator_error(err: IndicatorError) -> PyErr {
 
 fn to_array<'py>(py: Python<'py>, values: Vec<f64>) -> Bound<'py, PyArray1<f64>> {
     PyArray1::from_vec(py, values)
+}
+
+fn to_i64_array<'py>(py: Python<'py>, values: Vec<i64>) -> Bound<'py, PyArray1<i64>> {
+    PyArray1::from_vec(py, values)
+}
+
+fn volume_at_price_rows_dict<'py>(
+    py: Python<'py>,
+    rows: &q_indicators::VolumeAtPriceRows,
+) -> PyResult<Bound<'py, PyDict>> {
+    let d = PyDict::new(py);
+    d.set_item("segment", to_i64_array(py, rows.segment.clone()))?;
+    d.set_item("price", to_array(py, rows.price.clone()))?;
+    d.set_item("buy", to_array(py, rows.buy.clone()))?;
+    d.set_item("sell", to_array(py, rows.sell.clone()))?;
+    d.set_item("unknown", to_array(py, rows.unknown.clone()))?;
+    d.set_item("total", to_array(py, rows.total.clone()))?;
+    d.set_item("delta", to_array(py, rows.delta.clone()))?;
+    d.set_item("trades", to_i64_array(py, rows.trades.clone()))?;
+    Ok(d)
+}
+
+fn volume_at_price_segments_dict<'py>(
+    py: Python<'py>,
+    segments: &q_indicators::VolumeAtPriceSegments,
+) -> PyResult<Bound<'py, PyDict>> {
+    let d = PyDict::new(py);
+    d.set_item("total", to_array(py, segments.total.clone()))?;
+    d.set_item("buy", to_array(py, segments.buy.clone()))?;
+    d.set_item("sell", to_array(py, segments.sell.clone()))?;
+    d.set_item("unknown", to_array(py, segments.unknown.clone()))?;
+    d.set_item("trades", to_i64_array(py, segments.trades.clone()))?;
+    d.set_item("poc", to_array(py, segments.poc.clone()))?;
+    d.set_item("vah", to_array(py, segments.vah.clone()))?;
+    d.set_item("val", to_array(py, segments.val.clone()))?;
+    d.set_item(
+        "skipped_trades",
+        to_i64_array(py, segments.skipped_trades.clone()),
+    )?;
+    d.set_item(
+        "off_grid_trades",
+        to_i64_array(py, segments.off_grid_trades.clone()),
+    )?;
+    Ok(d)
+}
+
+fn volume_at_price_levels_dict<'py>(
+    py: Python<'py>,
+    levels: &q_indicators::VolumeAtPriceLevels,
+) -> PyResult<Bound<'py, PyDict>> {
+    let d = PyDict::new(py);
+    d.set_item("poc", to_array(py, levels.poc.clone()))?;
+    d.set_item("vah", to_array(py, levels.vah.clone()))?;
+    d.set_item("val", to_array(py, levels.val.clone()))?;
+    d.set_item("total", to_array(py, levels.total.clone()))?;
+    Ok(d)
 }
 
 #[pyfunction]
@@ -423,6 +479,75 @@ fn quote_spread_bars<'py>(
     ))
 }
 
+#[pyfunction]
+#[expect(
+    clippy::too_many_arguments,
+    reason = "volume_at_price mirrors the Rust kernel column list"
+)]
+fn volume_at_price<'py>(
+    py: Python<'py>,
+    time_msc: PyReadonlyArray1<'py, i64>,
+    price: PyReadonlyArray1<'py, f64>,
+    volume: PyReadonlyArray1<'py, f64>,
+    flags: PyReadonlyArray1<'py, i64>,
+    segment_open_msc: PyReadonlyArray1<'py, i64>,
+    segment_close_msc: PyReadonlyArray1<'py, i64>,
+    tick_size: f64,
+    row_ticks: i64,
+    value_area: f64,
+) -> PyResult<(Bound<'py, PyDict>, Bound<'py, PyDict>)> {
+    let out = q_indicators::volume_at_price(
+        contiguous_i64("time_msc", &time_msc)?,
+        contiguous("price", &price)?,
+        contiguous("volume", &volume)?,
+        contiguous_i64("flags", &flags)?,
+        contiguous_i64("segment_open_msc", &segment_open_msc)?,
+        contiguous_i64("segment_close_msc", &segment_close_msc)?,
+        tick_size,
+        row_ticks,
+        value_area,
+    )
+    .map_err(indicator_error)?;
+    Ok((
+        volume_at_price_rows_dict(py, &out.rows)?,
+        volume_at_price_segments_dict(py, &out.segments)?,
+    ))
+}
+
+#[pyfunction]
+#[expect(
+    clippy::too_many_arguments,
+    reason = "volume_at_price_levels mirrors the Rust kernel column list"
+)]
+fn volume_at_price_levels<'py>(
+    py: Python<'py>,
+    time_msc: PyReadonlyArray1<'py, i64>,
+    price: PyReadonlyArray1<'py, f64>,
+    volume: PyReadonlyArray1<'py, f64>,
+    flags: PyReadonlyArray1<'py, i64>,
+    session: PyReadonlyArray1<'py, i64>,
+    checkpoint_msc: PyReadonlyArray1<'py, i64>,
+    checkpoint_session: PyReadonlyArray1<'py, i64>,
+    tick_size: f64,
+    row_ticks: i64,
+    value_area: f64,
+) -> PyResult<Bound<'py, PyDict>> {
+    let out = q_indicators::volume_at_price_levels(
+        contiguous_i64("time_msc", &time_msc)?,
+        contiguous("price", &price)?,
+        contiguous("volume", &volume)?,
+        contiguous_i64("flags", &flags)?,
+        contiguous_i64("session", &session)?,
+        contiguous_i64("checkpoint_msc", &checkpoint_msc)?,
+        contiguous_i64("checkpoint_session", &checkpoint_session)?,
+        tick_size,
+        row_ticks,
+        value_area,
+    )
+    .map_err(indicator_error)?;
+    volume_at_price_levels_dict(py, &out)
+}
+
 pub(crate) fn register(parent: &Bound<'_, PyModule>) -> PyResult<()> {
     let m = PyModule::new(parent.py(), "indicators")?;
     m.add_function(wrap_pyfunction!(realized_vol, &m)?)?;
@@ -452,6 +577,8 @@ pub(crate) fn register(parent: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(vol_normalize, &m)?)?;
     m.add_function(wrap_pyfunction!(volatility_log_ratio, &m)?)?;
     m.add_function(wrap_pyfunction!(quote_spread_bars, &m)?)?;
+    m.add_function(wrap_pyfunction!(volume_at_price, &m)?)?;
+    m.add_function(wrap_pyfunction!(volume_at_price_levels, &m)?)?;
     parent.add_submodule(&m)?;
     parent
         .py()

@@ -55,6 +55,7 @@ names = [
     "log_return", "realized_vol_per_bar", "ewma_vol_per_bar", "rogers_satchell",
     "true_range", "atr_fraction", "price_zscore_log", "ewma_trend_spread",
     "vol_normalize", "volatility_log_ratio", "quote_spread_bars",
+    "volume_at_price", "volume_at_price_levels",
 ]
 for name in names:
     assert hasattr(qi, name), f"missing q_core.indicators.{{name}}"
@@ -147,6 +148,39 @@ carry = qi.quote_spread_bars(
     np.array([-30_000], dtype=np.int64), bid, ask, flags, session, bar_open, bar_close, 120_000
 )
 assert carry[3][0] == 1.0
+
+buy = 1 << 5
+sell = 1 << 6
+vap_time = np.array([0, 1, 2, 3], dtype=np.int64)
+vap_price = np.array([100.0, 100.5, 100.0, 101.0], dtype=np.float64)
+vap_vol = np.array([10.0, 5.0, 20.0, 3.0], dtype=np.float64)
+vap_flags = np.array([buy, buy, sell, buy | sell], dtype=np.int64)
+rows, segments = qi.volume_at_price(
+    vap_time, vap_price, vap_vol, vap_flags,
+    np.array([0], dtype=np.int64), np.array([10_000], dtype=np.int64),
+    0.5, 1, 0.7,
+)
+assert isinstance(rows, dict) and isinstance(segments, dict)
+assert abs(rows["total"][0] - 30.0) < 1e-12 and abs(segments["poc"][0] - 100.0) < 1e-12
+vap_sess = np.array([1, 1, 1, 1], dtype=np.int64)
+levels = qi.volume_at_price_levels(
+    vap_time, vap_price, vap_vol, vap_flags, vap_sess,
+    np.array([50], dtype=np.int64), np.array([1], dtype=np.int64),
+    0.5, 1, 0.7,
+)
+assert isinstance(levels, dict)
+assert abs(levels["total"][0] - segments["total"][0]) < 1e-12
+assert abs(levels["poc"][0] - segments["poc"][0]) < 1e-12
+try:
+    qi.volume_at_price(
+        vap_time, vap_price, vap_vol, vap_flags,
+        np.array([0], dtype=np.int64), np.array([10_000], dtype=np.int64),
+        0.5, 0, 0.7,
+    )
+except ValueError as e:
+    assert "row_ticks" in str(e)
+else:
+    raise AssertionError("invalid row_ticks must raise ValueError")
 
 print("indicator projection checks passed")
 """
