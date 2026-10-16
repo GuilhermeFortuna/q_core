@@ -23,6 +23,7 @@ Add the kernels that turn a trade tape into volume at price: how much volume tra
 - A tick is a **trade** when `flags` has `BUY_FLAG` or `SELL_FLAG`; its side comes from `AggressorSide::from_flags`, so a tick with both bits is `Unknown`. Other ticks are ignored. This is the rule `q_backend`'s tick store already uses for `real_volume`.
 - A trade with a non-finite or non-positive price or volume is **skipped** and counted in its segment's `skipped_trades`. Volume is summed as given; the kernel interprets no unit.
 - **Price rows.** With tick size `t` (finite, `> 0`) and `row_ticks` `m` (integer `>= 1`): the trade's tick index is `k = round_half_even(price / t)`; the trade is **off grid** when `abs(price / t - k) > 1e-6` and is counted in `off_grid_trades` but still binned at `k`. Its row is `r = floor(k / m)` and the row price is `r * m * t`, the lowest price the row covers. Rows are identified by `r`, never by comparing floats.
+- A finite positive price whose rounded tick index cannot be represented as int64 is rejected with an `IndicatorError` naming `price`. Range-centre comparisons use integer arithmetic wide enough for any representable row.
 - Value-area share `v` is finite and in `(0, 1]`.
 - Sums run in source order. No parallelism, fused multiply-add or reordered sums. NaN is the only missing value.
 

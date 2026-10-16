@@ -182,6 +182,26 @@ except ValueError as e:
 else:
     raise AssertionError("invalid row_ticks must raise ValueError")
 
+# Preserve tape-order totals through the Python projection and keep the full
+# traded range at a 100% value-area share even when the small row rounds away.
+_, ordered_segments = qi.volume_at_price(
+    np.array([0, 1, 2], dtype=np.int64), np.array([100., 101., 101.]),
+    np.array([1e16, 1., 1.]), np.full(3, buy, dtype=np.int64),
+    np.array([0], dtype=np.int64), np.array([3], dtype=np.int64), .5, 1, 1.,
+)
+assert ordered_segments["total"][0] == 1e16
+assert ordered_segments["vah"][0] == 101.
+try:
+    qi.volume_at_price(
+        np.array([0], dtype=np.int64), np.array([1e308]), np.array([1.]),
+        np.array([buy], dtype=np.int64), np.array([0], dtype=np.int64),
+        np.array([1], dtype=np.int64), .5, 1, .7,
+    )
+except ValueError as e:
+    assert "price" in str(e)
+else:
+    raise AssertionError("unrepresentable tick index must raise ValueError")
+
 print("indicator projection checks passed")
 """
         res = subprocess.run([str(python_bin), "-c", code], capture_output=True, text=True)
