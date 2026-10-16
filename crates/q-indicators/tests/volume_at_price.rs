@@ -355,3 +355,129 @@ fn criterion_8_determinism_rejections_and_prefix() {
         Err(IndicatorError::InvalidParameter { .. })
     ));
 }
+
+#[test]
+fn totals_follow_tape_order_across_rows_and_sides() {
+    let out = volume_at_price(
+        &[0, 1, 2],
+        &[100.0, 101.0, 101.0],
+        &[1e16, 1.0, 1.0],
+        &[BUY_FLAG as i64; 3],
+        &[0],
+        &[3],
+        T,
+        1,
+        VA,
+    )
+    .unwrap();
+    assert_eq!(out.segments.buy[0].to_bits(), 1e16_f64.to_bits());
+    assert_eq!(out.segments.total[0].to_bits(), 1e16_f64.to_bits());
+    let mixed = volume_at_price(
+        &[0, 1, 2],
+        &[100.0; 3],
+        &[1.0, 1e16, 1.0],
+        &[BUY_FLAG as i64, SELL_FLAG as i64, BUY_FLAG as i64],
+        &[0],
+        &[3],
+        T,
+        1,
+        VA,
+    )
+    .unwrap();
+    assert_eq!(mixed.rows.total[0].to_bits(), 1e16_f64.to_bits());
+    assert_eq!(mixed.segments.total[0].to_bits(), 1e16_f64.to_bits());
+}
+
+#[test]
+fn full_value_area_includes_small_volume_at_range_edge() {
+    let out = volume_at_price(
+        &[0, 1],
+        &[100.0, 101.0],
+        &[1e16, 1.0],
+        &[BUY_FLAG as i64; 2],
+        &[0],
+        &[2],
+        T,
+        1,
+        1.0,
+    )
+    .unwrap();
+    assert_close(out.segments.val[0], 100.0, "full value area low");
+    assert_close(out.segments.vah[0], 101.0, "full value area high");
+}
+
+#[test]
+fn large_representable_rows_do_not_overflow_centre() {
+    let out = volume_at_price(
+        &[0],
+        &[3e18],
+        &[1.0],
+        &[BUY_FLAG as i64],
+        &[0],
+        &[1],
+        T,
+        1,
+        VA,
+    )
+    .unwrap();
+    assert_close(out.segments.poc[0], 3e18, "large row poc");
+}
+
+#[test]
+fn unrepresentable_tick_indices_are_rejected_by_both_kernels() {
+    for price in [1e20, 1e308] {
+        assert!(matches!(
+            volume_at_price(
+                &[0],
+                &[price],
+                &[1.0],
+                &[BUY_FLAG as i64],
+                &[0],
+                &[1],
+                T,
+                1,
+                VA,
+            ),
+            Err(IndicatorError::InvalidInput {
+                parameter: "price",
+                ..
+            })
+        ));
+        assert!(matches!(
+            volume_at_price_levels(
+                &[0],
+                &[price],
+                &[1.0],
+                &[BUY_FLAG as i64],
+                &[1],
+                &[1],
+                &[1],
+                T,
+                1,
+                VA,
+            ),
+            Err(IndicatorError::InvalidInput {
+                parameter: "price",
+                ..
+            })
+        ));
+    }
+}
+
+#[test]
+fn levels_do_not_process_prices_after_the_final_checkpoint() {
+    let out = volume_at_price_levels(
+        &[0, 2],
+        &[100.0, 1e308],
+        &[1.0; 2],
+        &[BUY_FLAG as i64; 2],
+        &[1; 2],
+        &[1],
+        &[1],
+        T,
+        1,
+        VA,
+    )
+    .unwrap();
+    assert_close(out.poc[0], 100.0, "checkpoint ignores suffix");
+}

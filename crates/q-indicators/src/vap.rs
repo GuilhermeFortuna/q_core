@@ -9,6 +9,7 @@ const OFF_GRID_EPS: f64 = 1e-6;
 
 #[derive(Debug, Clone, Default, PartialEq)]
 struct RowAccum {
+    total: f64,
     buy: f64,
     sell: f64,
     unknown: f64,
@@ -17,7 +18,17 @@ struct RowAccum {
 
 impl RowAccum {
     fn total(&self) -> f64 {
-        self.buy + self.sell + self.unknown
+        self.total
+    }
+
+    fn add(&mut self, volume: f64, side: AggressorSide) {
+        self.total += volume;
+        self.trades += 1;
+        match side {
+            AggressorSide::Buy => self.buy += volume,
+            AggressorSide::Sell => self.sell += volume,
+            AggressorSide::Unknown => self.unknown += volume,
+        }
     }
 
     fn delta(&self) -> f64 {
@@ -28,6 +39,7 @@ impl RowAccum {
 #[derive(Debug, Clone, Default, PartialEq)]
 struct Profile {
     rows: BTreeMap<i64, RowAccum>,
+    totals: RowAccum,
     skipped_trades: i64,
     off_grid_trades: i64,
 }
@@ -35,6 +47,7 @@ struct Profile {
 impl Profile {
     fn clear(&mut self) {
         self.rows.clear();
+        self.totals = RowAccum::default();
         self.skipped_trades = 0;
         self.off_grid_trades = 0;
     }
@@ -44,12 +57,29 @@ impl Profile {
         raw & BUY_FLAG != 0 || raw & SELL_FLAG != 0
     }
 
-    fn add_trade(&mut self, price: f64, volume: f64, flags: i64, tick_size: f64, row_ticks: i64) {
+    fn add_trade(
+        &mut self,
+        price: f64,
+        volume: f64,
+        flags: i64,
+        tick_size: f64,
+        row_ticks: i64,
+        function: &'static str,
+    ) -> Result<(), IndicatorError> {
         if !price.is_finite() || price <= 0.0 || !volume.is_finite() || volume <= 0.0 {
             self.skipped_trades += 1;
-            return;
+            return Ok(());
         }
         let ratio = price / tick_size;
+        // i64::MAX rounds up to 2^63 as f64; the upper bound must be exclusive.
+        if !ratio.is_finite() || ratio.round_ties_even() >= i64::MAX as f64 {
+            return Err(IndicatorError::InvalidInput {
+                function,
+                parameter: "price",
+                value: price,
+                requirement: "price / tick_size must round to a representable int64 tick index",
+            });
+        }
         let k = round_half_even(ratio);
         if (ratio - k as f64).abs() > OFF_GRID_EPS {
             self.off_grid_trades += 1;
@@ -57,26 +87,9 @@ impl Profile {
         let row = floor_div(k, row_ticks);
         let side = AggressorSide::from_flags(flags as u32);
         let entry = self.rows.entry(row).or_default();
-        entry.trades += 1;
-        match side {
-            AggressorSide::Buy => entry.buy += volume,
-            AggressorSide::Sell => entry.sell += volume,
-            AggressorSide::Unknown => entry.unknown += volume,
-        }
-    }
-
-    fn totals(&self) -> (f64, f64, f64, i64) {
-        let mut buy = 0.0;
-        let mut sell = 0.0;
-        let mut unknown = 0.0;
-        let mut trades = 0_i64;
-        for row in self.rows.values() {
-            buy += row.buy;
-            sell += row.sell;
-            unknown += row.unknown;
-            trades += row.trades;
-        }
-        (buy, sell, unknown, trades)
+        entry.add(volume, side);
+        self.totals.add(volume, side);
+        Ok(())
     }
 }
 
@@ -85,23 +98,7 @@ fn row_price(row: i64, row_ticks: i64, tick_size: f64) -> f64 {
 }
 
 fn round_half_even(x: f64) -> i64 {
-    if !x.is_finite() {
-        return 0;
-    }
-    let floor = x.floor();
-    let frac = x - floor;
-    if frac < 0.5 {
-        return floor as i64;
-    }
-    if frac > 0.5 {
-        return floor as i64 + 1;
-    }
-    let f = floor as i64;
-    if f % 2 == 0 {
-        f
-    } else {
-        f + 1
-    }
+    x.round_ties_even() as i64
 }
 
 fn floor_div(n: i64, d: i64) -> i64 {
@@ -123,6 +120,7 @@ fn poc_and_value_area(
     tick_size: f64,
     row_ticks: i64,
     value_area: f64,
+    total_vol: f64,
 ) -> Levels {
     if rows.is_empty() {
         return Levels {
@@ -133,24 +131,30 @@ fn poc_and_value_area(
     }
     let min_r = rows.keys().next().copied().unwrap();
     let max_r = rows.keys().next_back().copied().unwrap();
-    let centre = (min_r + max_r) as f64 / 2.0;
+    let centre_twice = i128::from(min_r) + i128::from(max_r);
 
     let mut poc_row = min_r;
     let mut poc_total = -1.0;
     for (&r, acc) in rows.iter() {
         let t = acc.total();
-        let dist_r = dist_row(r, centre);
-        let dist_poc = dist_row(poc_row, centre);
+        let dist_r = dist_row(r, centre_twice);
+        let dist_poc = dist_row(poc_row, centre_twice);
         let better = t > poc_total
             || (t.to_bits() == poc_total.to_bits()
-                && (dist_r < dist_poc || (dist_r.to_bits() == dist_poc.to_bits() && r < poc_row)));
+                && (dist_r < dist_poc || (dist_r == dist_poc && r < poc_row)));
         if better {
             poc_total = t;
             poc_row = r;
         }
     }
 
-    let total_vol: f64 = rows.values().map(RowAccum::total).sum();
+    if value_area.to_bits() == 1.0_f64.to_bits() {
+        return Levels {
+            poc: row_price(poc_row, row_ticks, tick_size),
+            vah: row_price(max_r, row_ticks, tick_size),
+            val: row_price(min_r, row_ticks, tick_size),
+        };
+    }
     let target = value_area * total_vol;
     let mut included: BTreeMap<i64, f64> = BTreeMap::new();
     included.insert(poc_row, rows.get(&poc_row).map_or(0.0, RowAccum::total));
@@ -210,8 +214,8 @@ fn poc_and_value_area(
     }
 }
 
-fn dist_row(r: i64, centre: f64) -> f64 {
-    (r as f64 - centre).abs()
+fn dist_row(r: i64, centre_twice: i128) -> i128 {
+    (2 * i128::from(r) - centre_twice).abs()
 }
 
 fn row_volume(rows: &BTreeMap<i64, RowAccum>, r: i64) -> f64 {
@@ -365,9 +369,20 @@ fn finalize_segment(
     rows_out: &mut VolumeAtPriceRows,
     segments_out: &mut VolumeAtPriceSegments,
 ) {
-    let (buy, sell, unknown, trades) = profile.totals();
-    let total = buy + sell + unknown;
-    let levels = poc_and_value_area(&profile.rows, tick_size, row_ticks, value_area);
+    let RowAccum {
+        total,
+        buy,
+        sell,
+        unknown,
+        trades,
+    } = profile.totals;
+    let levels = poc_and_value_area(
+        &profile.rows,
+        tick_size,
+        row_ticks,
+        value_area,
+        profile.totals.total,
+    );
     for (&r, acc) in profile.rows.iter() {
         rows_out.segment.push(segment_index);
         rows_out.price.push(row_price(r, row_ticks, tick_size));
@@ -468,7 +483,14 @@ pub fn volume_at_price(
         while tick_idx < n_ticks && time_msc[tick_idx] < close {
             let f = flags[tick_idx];
             if Profile::is_trade(f) {
-                profile.add_trade(price[tick_idx], volume[tick_idx], f, tick_size, row_ticks);
+                profile.add_trade(
+                    price[tick_idx],
+                    volume[tick_idx],
+                    f,
+                    tick_size,
+                    row_ticks,
+                    FN,
+                )?;
             }
             tick_idx += 1;
         }
@@ -514,9 +536,14 @@ fn emit_checkpoint(
         out.total.push(0.0);
         return;
     }
-    let (buy, sell, unknown, _) = profile.totals();
-    let total = buy + sell + unknown;
-    let levels = poc_and_value_area(&profile.rows, tick_size, row_ticks, value_area);
+    let total = profile.totals.total;
+    let levels = poc_and_value_area(
+        &profile.rows,
+        tick_size,
+        row_ticks,
+        value_area,
+        profile.totals.total,
+    );
     out.poc.push(levels.poc);
     out.vah.push(levels.vah);
     out.val.push(levels.val);
@@ -576,32 +603,8 @@ pub fn volume_at_price_levels(
     let mut current_session: Option<i64> = None;
     let mut tick_idx = 0usize;
 
-    while tick_idx < n_ticks || out.poc.len() < checkpoint_msc.len() {
-        if out.poc.len() < checkpoint_msc.len() {
-            let cp_i = out.poc.len();
-            let cp = checkpoint_msc[cp_i];
-            while tick_idx < n_ticks && time_msc[tick_idx] < cp {
-                let sess = session[tick_idx];
-                if current_session != Some(sess) {
-                    profile.clear();
-                    current_session = Some(sess);
-                }
-                let f = flags[tick_idx];
-                if Profile::is_trade(f) {
-                    profile.add_trade(price[tick_idx], volume[tick_idx], f, tick_size, row_ticks);
-                }
-                tick_idx += 1;
-            }
-            emit_checkpoint(
-                &profile,
-                checkpoint_session[cp_i],
-                current_session,
-                tick_size,
-                row_ticks,
-                value_area,
-                &mut out,
-            );
-        } else {
+    for (cp_i, &cp) in checkpoint_msc.iter().enumerate() {
+        while tick_idx < n_ticks && time_msc[tick_idx] < cp {
             let sess = session[tick_idx];
             if current_session != Some(sess) {
                 profile.clear();
@@ -609,10 +612,26 @@ pub fn volume_at_price_levels(
             }
             let f = flags[tick_idx];
             if Profile::is_trade(f) {
-                profile.add_trade(price[tick_idx], volume[tick_idx], f, tick_size, row_ticks);
+                profile.add_trade(
+                    price[tick_idx],
+                    volume[tick_idx],
+                    f,
+                    tick_size,
+                    row_ticks,
+                    FN,
+                )?;
             }
             tick_idx += 1;
         }
+        emit_checkpoint(
+            &profile,
+            checkpoint_session[cp_i],
+            current_session,
+            tick_size,
+            row_ticks,
+            value_area,
+            &mut out,
+        );
     }
 
     Ok(out)
