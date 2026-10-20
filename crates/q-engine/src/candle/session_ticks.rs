@@ -8,6 +8,7 @@ pub struct TradePrices {
     pub price: Vec<f64>,
 }
 
+/// Loads aligned, timestamp-sorted trade-price columns for one session ordinal.
 pub trait SessionLoader {
     fn load(&self, session: i64) -> Result<Option<TradePrices>, String>;
 }
@@ -118,15 +119,27 @@ impl<L: SessionLoader> SessionTicks<L> {
             });
         }
         let session = self.session[bar];
-        if self.cached.lock().unwrap().as_ref().map(|entry| entry.0) != Some(session) {
+        let mut cached = self.cached.lock().unwrap();
+        if cached.as_ref().map(|entry| entry.0) != Some(session) {
             let loaded = self
                 .loader
                 .load(session)
                 .map_err(|reason| SessionTickError::Loader { bar, reason })?
                 .ok_or(SessionTickError::MissingSession { bar, session })?;
-            *self.cached.lock().unwrap() = Some((session, loaded));
+            if loaded.time_msc.len() != loaded.price.len() {
+                return Err(SessionTickError::Loader {
+                    bar,
+                    reason: "session timestamp and price lengths differ".into(),
+                });
+            }
+            if loaded.time_msc.windows(2).any(|pair| pair[0] > pair[1]) {
+                return Err(SessionTickError::Loader {
+                    bar,
+                    reason: "session timestamps are not sorted".into(),
+                });
+            }
+            *cached = Some((session, loaded));
         }
-        let cached = self.cached.lock().unwrap();
         let data = &cached.as_ref().unwrap().1;
         let start = self.start_msc[bar];
         let end = self.end_msc[bar];
@@ -192,11 +205,16 @@ mod tests {
     };
     struct Loader(Arc<AtomicUsize>);
     impl SessionLoader for Loader {
-        fn load(&self, _: i64) -> Result<Option<TradePrices>, String> {
+        fn load(&self, session: i64) -> Result<Option<TradePrices>, String> {
             self.0.fetch_add(1, Ordering::SeqCst);
+            let price = if session == 0 {
+                vec![1.0, 2.0, 1.5]
+            } else {
+                vec![4.0, 5.0, 4.5]
+            };
             Ok(Some(TradePrices {
                 time_msc: vec![10, 11, 12],
-                price: vec![1.0, 2.0, 1.5],
+                price,
             }))
         }
     }
@@ -279,16 +297,16 @@ mod tests {
                 session: vec![0, 1, 1],
                 start_msc: vec![10, 10, 12],
                 end_msc: vec![12, 12, 13],
-                open: vec![1.0, 1.0, 1.5],
-                high: vec![2.0, 2.0, 1.5],
-                low: vec![1.0, 1.0, 1.5],
-                close: vec![2.0, 2.0, 1.5],
+                open: vec![1.0, 4.0, 4.5],
+                high: vec![2.0, 5.0, 4.5],
+                low: vec![1.0, 4.0, 4.5],
+                close: vec![2.0, 5.0, 4.5],
             },
         )
         .unwrap();
-        source.prices_checked(0).unwrap();
-        source.prices_checked(1).unwrap();
-        source.prices_checked(2).unwrap();
+        assert_eq!(source.prices_checked(0).unwrap().price, vec![1.0, 2.0]);
+        assert_eq!(source.prices_checked(1).unwrap().price, vec![4.0, 5.0]);
+        assert_eq!(source.prices_checked(2).unwrap().price, vec![4.5]);
         assert_eq!(loads.load(Ordering::SeqCst), 2);
     }
 }
