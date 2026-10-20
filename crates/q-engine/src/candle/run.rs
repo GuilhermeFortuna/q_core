@@ -5,7 +5,9 @@ use crate::exits::{ExitInputs, ExitRuleId, ExitRuleSet, PositionKey, Side};
 
 use super::decision::{Decision, DecisionStep, QueuedEntry, TradeView};
 use super::inputs::{BarSignals, CandleInputs};
-use super::protective::{touch_index, IntrabarPrices, IntrabarSource, Levels, RejectedEntries};
+use super::protective::{
+    touch_index, IntrabarPrices, IntrabarSource, Levels, RejectedEntries, RestingKind, RestingOrder,
+};
 use super::{side_cost, CandleConfig, CandleError};
 
 /// Microseconds in one calendar day.
@@ -70,6 +72,13 @@ pub struct TradeLedger {
     pub exit_reason: Vec<i64>,
     /// Time of the price that triggered an intrabar exit; `-1` for closed-bar exits.
     pub exit_time_us: Vec<i64>,
+    /// How the trade opened: `0` open fill, `1` priced, `2` stop order, `3` limit order.
+    pub entry_kind: Vec<i64>,
+    /// Time of the price that filled a resting order; `-1` for every other entry.
+    pub entry_time_us: Vec<i64>,
+    /// Stop and target in force when the trade closed, or now if it is still open. `NaN` = unset.
+    pub final_stop_price: Vec<f64>,
+    pub final_target_price: Vec<f64>,
 }
 
 /// Per bar: `exit_reason[exit_offsets[i]..exit_offsets[i + 1]]` and the entry.
@@ -94,6 +103,26 @@ pub struct CandleRun {
     pub rejected: RejectedEntries,
 }
 
+/// How a trade was opened. The code is the ledger's `entry_kind`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum EntryKind {
+    Open,
+    Priced,
+    Stop,
+    Limit,
+}
+
+impl EntryKind {
+    fn code(self) -> i64 {
+        match self {
+            Self::Open => 0,
+            Self::Priced => 1,
+            Self::Stop => 2,
+            Self::Limit => 3,
+        }
+    }
+}
+
 /// One trade while the loop holds it; the ledger is this vector projected into columns.
 #[derive(Clone, Copy, Debug)]
 struct Trade {
@@ -110,6 +139,44 @@ struct Trade {
     levels: Levels,
     exit_time_us: i64,
     breakeven: BreakevenStop,
+    kind: EntryKind,
+    entry_time_us: i64,
+    /// The scan tick that filled the trade on its entry bar. That price is never its exit.
+    first_tick: usize,
+}
+
+impl Trade {
+    /// Whether a scan tick of `bar` is the trade's own fill, which cannot trigger it.
+    fn skips_tick(&self, bar: usize, tick: usize) -> bool {
+        self.entry_bar == bar && tick == self.first_tick
+    }
+}
+
+/// A resting entry order waiting for a fill. At most one is working at a time.
+#[derive(Clone, Copy, Debug)]
+struct Working {
+    side: Side,
+    strength: f64,
+    order: RestingOrder,
+    levels: Levels,
+    placed_bar: usize,
+}
+
+impl Working {
+    /// Lapsed once a bar is past `placed_bar + expire_bars`, the last bar it may fill on.
+    fn lapsed_at(&self, bar: usize) -> bool {
+        self.order
+            .expire_bars
+            .is_some_and(|bars| bar - self.placed_bar > bars)
+    }
+
+    fn reached_by_range(&self, high: f64, low: f64) -> bool {
+        self.order.reached_by_range(self.side, high, low)
+    }
+
+    fn fill_at(&self, price: f64) -> Option<f64> {
+        self.order.fill_at(self.side, price)
+    }
 }
 
 /// `TradeRegistry.close_trade` plus `_close_trade_with_costs`: charge the exit side, then
@@ -175,7 +242,8 @@ fn time_of_day(time_us: i64) -> i64 {
     time_us.rem_euclid(US_PER_DAY)
 }
 
-/// Immutable view of a filled trade at the strategy decision boundary.
+/// Immutable view of a filled trade at the strategy decision boundary. The levels are the trade's
+/// current stop and target, `NaN` where unset.
 #[derive(Clone, Copy, Debug)]
 pub struct PositionSnapshot {
     pub key: PositionKey,
@@ -183,6 +251,8 @@ pub struct PositionSnapshot {
     pub entry_bar: usize,
     pub entry_price: f64,
     pub quantity: f64,
+    pub stop_price: f64,
+    pub target_price: f64,
 }
 
 pub type StrategyFn<'a, E> = dyn FnMut(usize, &[PositionSnapshot]) -> Result<BarSignals, E> + 'a;
@@ -293,6 +363,8 @@ fn snapshot(trades: &[Trade]) -> Vec<PositionSnapshot> {
             entry_bar: trade.entry_bar,
             entry_price: trade.entry_price,
             quantity: trade.quantity,
+            stop_price: trade.levels.stop,
+            target_price: trade.levels.target,
         })
         .collect()
 }
@@ -312,6 +384,15 @@ fn strategy_signals<E: From<CandleError>>(
     }
     if let Some(price) = signals.entry_price {
         check_level("entry_price", bar, price)?;
+    }
+    if let Some(order) = signals.resting {
+        check_resting(&signals, order, bar)?;
+    }
+    if let Some(stop) = signals.amend_stop {
+        check_positive("amend_stop", bar, stop)?;
+    }
+    if let Some(target) = signals.amend_target {
+        check_positive("amend_target", bar, target)?;
     }
     if !(-1..=1).contains(&signals.entry) {
         return Err(CandleError::InvalidSignal {
@@ -365,6 +446,7 @@ where
     // take it: the close only clears trades the decision saw open.
     let mut queued_exempt: Option<usize> = None;
     let mut rejected = RejectedEntries::default();
+    let mut working: Option<Working> = None;
 
     let mut trace = DecisionTrace {
         exit_offsets: Vec::with_capacity(n + 1),
@@ -389,8 +471,13 @@ where
                 .day_trade
                 .is_some_and(|window| now >= window.force_close_us);
 
+            if working.is_some_and(|order| order.lapsed_at(bar)) {
+                working = None;
+            }
+
             if force_close_now {
-                // A. Force-close at close time, ahead of everything queued.
+                // A. Force-close at close time, ahead of everything queued. A working order
+                // lapses with the session.
                 close_all(
                     &mut trades,
                     bar,
@@ -402,6 +489,7 @@ where
                 );
                 queued = Decision::default();
                 queued_exempt = None;
+                working = None;
                 strategy_signals(&mut callbacks, bar, &trades)?;
             } else {
                 // B. The first queued close takes out every open trade under its own reason;
@@ -419,30 +507,45 @@ where
                     );
                 }
 
-                // C. Size and open the queued entry, unless its levels already put it on the
-                // wrong side of the fill.
+                // C. Size and open the queued entry, unless the cap or its levels refuse it.
                 if let Some(entry) = queued.entry {
-                    if queued_levels.rejects(entry.side, fill) {
-                        rejected.push(bar, entry.side, fill, queued_levels);
-                    } else {
-                        open_entry(
-                            &mut trades,
-                            bar,
-                            fill,
-                            entry,
-                            queued_levels,
-                            inputs,
-                            config,
-                            capital,
-                        );
-                    }
+                    open_entry(
+                        &mut trades,
+                        &mut rejected,
+                        bar,
+                        fill,
+                        entry,
+                        Opening {
+                            kind: EntryKind::Open,
+                            levels: queued_levels,
+                            time_us: -1,
+                            tick: 0,
+                        },
+                        inputs,
+                        config,
+                        capital,
+                    );
                 }
 
-                // Intrabar stops, targets and custom exits fill inside this bar, ahead of section D.
+                // Intrabar stops, targets, custom exits and the resting fill share one scan of this
+                // bar's trade prices, ahead of section D.
                 let exit = callbacks.exit.as_mut();
-                intrabar_fills(&mut trades, bar, inputs, config, &mut capital, exit)?;
+                intrabar_fills(
+                    &mut trades,
+                    &mut working,
+                    &mut rejected,
+                    bar,
+                    inputs,
+                    config,
+                    &mut capital,
+                    exit,
+                )?;
 
                 let runtime_signals = strategy_signals(&mut callbacks, bar, &trades)?;
+                // Amendments reach the trades the callback saw, from the next bar's first price.
+                if let Some(signals) = runtime_signals {
+                    amend_levels(&mut trades, signals);
+                }
 
                 // D. Evaluate this now-closed bar and queue for the next one.
                 decided = evaluate_bar(
@@ -456,6 +559,10 @@ where
                     last_bar_of_day,
                     runtime_signals,
                 );
+                // A cancel removes the working order. Any entry decided here replaces it.
+                if runtime_signals.is_some_and(|signals| signals.cancel_entry) {
+                    working = None;
+                }
                 queued = decided.clone();
                 queued_exempt = None;
                 // The levels and price are read from this bar only when it decides an entry.
@@ -468,8 +575,32 @@ where
                 } else {
                     Levels::NONE
                 };
+                if decided.entry.is_some() {
+                    working = None;
+                }
+                // A resting entry works from the next bar instead of queuing for its open.
+                let resting = decided
+                    .entry
+                    .and(runtime_signals.and_then(|signals| signals.resting));
+                if let (Some(entry), Some(order)) = (decided.entry, resting) {
+                    if !intrabar_ready(inputs) {
+                        return Err(CandleError::InvalidConfig {
+                            field: "resting_order",
+                            reason: "requires intrabar, open, high and low".to_string(),
+                        }
+                        .into());
+                    }
+                    queued.entry = None;
+                    working = Some(Working {
+                        side: entry.side,
+                        strength: entry.strength,
+                        order,
+                        levels: queued_levels,
+                        placed_bar: bar,
+                    });
+                }
                 // A priced entry fills on this bar, so it is never queued for the next one.
-                if let Some(entry) = decided.entry {
+                if let Some(entry) = decided.entry.filter(|_| resting.is_none()) {
                     let runtime_price = runtime_signals.and_then(|signals| signals.entry_price);
                     if let Some(price) = priced_entry(inputs, bar, entry.side, runtime_price)? {
                         queued.entry = None;
@@ -502,6 +633,7 @@ where
                     );
                     queued = Decision::default();
                     queued_exempt = None;
+                    working = None;
                 }
             }
         } else {
@@ -547,18 +679,21 @@ where
     })
 }
 
-/// Between sections C and D: stops, targets and custom exits resolve in one scan of the bar's
-/// trade prices, so the first executable event in price order wins.
+/// Between sections C and D: stops, targets, custom exits and a resting fill resolve in one scan
+/// of the bar's trade prices, so the first executable event in price order wins.
 ///
 /// The range screen decides whether the bar's prices are asked for at all. A trade whose levels
-/// the range cannot reach never fills here. A trade opened on this bar skips its first price,
-/// which is its own fill. At each price a protective fill takes precedence over the custom exit.
+/// the range cannot reach never fills here, and neither does a working order the range cannot
+/// reach. A trade opened on this bar skips its own fill price. At each price a protective fill
+/// takes precedence over the custom exit, and both precede a resting fill.
 #[allow(
     clippy::too_many_arguments,
-    reason = "the fill pass reads the bar's state, its costs and the host's exit callbacks"
+    reason = "the scan reads the bar's state, its costs, the working order and the host's exit callbacks"
 )]
 fn intrabar_fills<E: From<CandleError>>(
-    trades: &mut [Trade],
+    trades: &mut Vec<Trade>,
+    working: &mut Option<Working>,
+    rejected: &mut RejectedEntries,
     bar: usize,
     inputs: &CandleInputs<'_>,
     config: &CandleConfig,
@@ -568,20 +703,25 @@ fn intrabar_fills<E: From<CandleError>>(
     let (Some(source), Some(high), Some(low)) = (inputs.intrabar, inputs.high, inputs.low) else {
         return Ok(());
     };
-    if !trades.iter().any(|trade| trade.open) {
+    let (high, low) = (high[bar], low[bar]);
+    let any_open = trades.iter().any(|trade| trade.open);
+    if !any_open && working.is_none() {
         return Ok(());
     }
 
     let mut exit = exit;
     let screened = match exit.as_mut() {
-        Some(exit) => (exit.screen)(bar, &snapshot(trades))?,
-        None => false,
+        Some(exit) if any_open => (exit.screen)(bar, &snapshot(trades))?,
+        _ => false,
     };
-    let reached: Vec<bool> = trades
+    let mut reached: Vec<bool> = trades
         .iter()
-        .map(|trade| trade.open && reached_by_range(trade, high[bar], low[bar], config))
+        .map(|trade| trade.open && reached_by_range(trade, high, low, config))
         .collect();
-    if !screened && !reached.contains(&true) {
+    let order_reached = working
+        .as_ref()
+        .is_some_and(|order| order.reached_by_range(high, low));
+    if !screened && !order_reached && !reached.contains(&true) {
         return Ok(());
     }
 
@@ -589,9 +729,8 @@ fn intrabar_fills<E: From<CandleError>>(
 
     let mut tick_exit = if screened { exit } else { None };
     for (tick, (&time_us, &price)) in prices.time_us.iter().zip(&prices.price).enumerate() {
-        let opened_on_tick = |trade: &Trade| trade.entry_bar == bar && tick == 0;
         for (index, trade) in trades.iter_mut().enumerate() {
-            if !trade.open || !reached[index] || opened_on_tick(trade) {
+            if !trade.open || !reached[index] || trade.skips_tick(bar, tick) {
                 continue;
             }
             let Some((reason, fill)) = trigger_price(trade, price, config) else {
@@ -602,20 +741,54 @@ fn intrabar_fills<E: From<CandleError>>(
             *capital += pnl;
         }
 
-        if !trades.iter().any(|trade| trade.open) {
+        let open_now = trades.iter().any(|trade| trade.open);
+        if !open_now && !(order_reached && working.is_some()) {
             break;
         }
-        let Some(exit) = tick_exit.as_mut() else {
-            continue;
+        if open_now {
+            if let Some(exit) = tick_exit.as_mut() {
+                if (exit.tick)(bar, tick, time_us, price, &snapshot(trades))? {
+                    for trade in trades
+                        .iter_mut()
+                        .filter(|trade| trade.open && !trade.skips_tick(bar, tick))
+                    {
+                        let pnl = close_trade(trade, bar, price, ExitReason::Signal, config);
+                        trade.exit_time_us = time_us;
+                        *capital += pnl;
+                    }
+                }
+            }
+        }
+
+        // The resting fill comes after the exits on the same price. Its trade's levels start on
+        // the next price, so this one is not checked against them.
+        let fill = if order_reached {
+            working.as_ref().and_then(|order| order.fill_at(price))
+        } else {
+            None
         };
-        if (exit.tick)(bar, tick, time_us, price, &snapshot(trades))? {
-            for trade in trades
-                .iter_mut()
-                .filter(|trade| trade.open && !opened_on_tick(trade))
-            {
-                let pnl = close_trade(trade, bar, price, ExitReason::Signal, config);
-                trade.exit_time_us = time_us;
-                *capital += pnl;
+        if let Some(fill) = fill {
+            // The order is consumed whether the cap or the wrong-side rule refuses it.
+            if let Some(order) = working.take() {
+                let kind = match order.order.kind {
+                    RestingKind::Stop => EntryKind::Stop,
+                    RestingKind::Limit => EntryKind::Limit,
+                };
+                let opening = Opening {
+                    kind,
+                    levels: order.levels,
+                    time_us,
+                    tick,
+                };
+                let entry = QueuedEntry {
+                    side: order.side,
+                    strength: order.strength,
+                };
+                if let Some(index) = open_entry(
+                    trades, rejected, bar, fill, entry, opening, inputs, config, *capital,
+                ) {
+                    reached.push(reached_by_range(&trades[index], high, low, config));
+                }
             }
         }
     }
@@ -713,8 +886,8 @@ fn priced_entry(
     Ok(Some(price))
 }
 
-/// Section D's priced entry: refused when its levels already sit on the wrong side of the price,
-/// otherwise opened at the price on this bar and resolved from the trade prices after its touch.
+/// Section D's priced entry: sized and capped like any entry, then opened at the price on this bar
+/// and resolved from the trade prices after its touch.
 #[allow(
     clippy::too_many_arguments,
     reason = "a priced entry reads the bar's state, its costs, its levels and the rejection log"
@@ -730,17 +903,19 @@ fn open_priced_entry<E: From<CandleError>>(
     capital: &mut f64,
     rejected: &mut RejectedEntries,
 ) -> Result<Option<usize>, E> {
-    if levels.rejects(entry.side, price) {
-        rejected.push(bar, entry.side, price, levels);
+    let opening = Opening {
+        kind: EntryKind::Priced,
+        levels,
+        time_us: -1,
+        tick: 0,
+    };
+    let Some(index) = open_entry(
+        trades, rejected, bar, price, entry, opening, inputs, config, *capital,
+    ) else {
         return Ok(None);
-    }
-    let opened = trades.len();
-    open_entry(trades, bar, price, entry, levels, inputs, config, *capital);
-    if trades.len() == opened {
-        return Ok(None);
-    }
-    resolve_entry_levels(&mut trades[opened], bar, inputs, config, capital)?;
-    Ok(Some(opened))
+    };
+    resolve_entry_levels(&mut trades[index], bar, inputs, config, capital)?;
+    Ok(Some(index))
 }
 
 /// Resolves a priced entry's own stop and target from the bar's trade prices after its touch. The
@@ -809,27 +984,46 @@ fn entry_levels<E: From<CandleError>>(
     Ok(Levels { stop, target })
 }
 
-/// Section C: size at the fill price with the current capital, trim to the cap, open.
+/// How an entry opens: its kind and levels, the time of its fill (`-1` for every kind but a resting
+/// order), and the scan tick it fills on (`0` for entries opened before the scan).
+#[derive(Clone, Copy, Debug)]
+struct Opening {
+    kind: EntryKind,
+    levels: Levels,
+    time_us: i64,
+    tick: usize,
+}
+
+/// Sizes an entry at its fill price with the current capital, then trims it to the position cap.
+/// An entry the cap leaves no room for is skipped, not rejected. Otherwise an entry whose levels
+/// sit on the wrong side of its fill is refused and reported. Returns the new trade's index.
+///
+/// An entry the sizing rule refuses is still reported when its levels are on the wrong side, as
+/// it always was.
 #[allow(
     clippy::too_many_arguments,
-    reason = "section C reads the queued levels alongside the bar's state"
+    reason = "an entry reads the bar's state, the fill, its opening kind and the rejection log"
 )]
 fn open_entry(
     trades: &mut Vec<Trade>,
+    rejected: &mut RejectedEntries,
     bar: usize,
     fill: f64,
     entry: QueuedEntry,
-    levels: Levels,
+    opening: Opening,
     inputs: &CandleInputs<'_>,
     config: &CandleConfig,
     capital: f64,
-) {
+) -> Option<usize> {
     let volatility = inputs.volatility.map(|column| column[bar]);
     let Some(mut quantity) = config
         .sizing
         .size(entry.strength, fill, capital, volatility)
     else {
-        return;
+        if opening.levels.rejects(entry.side, fill) {
+            rejected.push(bar, entry.side, fill, opening.levels);
+        }
+        return None;
     };
 
     if let Some(max_size) = config.sizing.max_position(fill, capital) {
@@ -841,11 +1035,16 @@ fn open_entry(
             .sum();
         let remaining = max_size - open_quantity;
         if remaining <= 0.0 {
-            return;
+            return None;
         }
         if quantity > remaining {
             quantity = remaining;
         }
+    }
+
+    if opening.levels.rejects(entry.side, fill) {
+        rejected.push(bar, entry.side, fill, opening.levels);
+        return None;
     }
 
     trades.push(Trade {
@@ -859,10 +1058,14 @@ fn open_entry(
         exit_price: f64::NAN,
         pnl: f64::NAN,
         exit_reason: -1,
-        levels,
+        levels: opening.levels,
         exit_time_us: -1,
         breakeven: BreakevenStop::default(),
+        kind: opening.kind,
+        entry_time_us: opening.time_us,
+        first_tick: opening.tick,
     });
+    Some(trades.len() - 1)
 }
 
 /// Section D, with the engine's day-trade gating around the decision step.
@@ -959,8 +1162,56 @@ fn ledger(trades: &[Trade]) -> TradeLedger {
         ledger.pnl.push(trade.pnl);
         ledger.exit_reason.push(trade.exit_reason);
         ledger.exit_time_us.push(trade.exit_time_us);
+        ledger.entry_kind.push(trade.kind.code());
+        ledger.entry_time_us.push(trade.entry_time_us);
+        ledger.final_stop_price.push(trade.levels.stop);
+        ledger.final_target_price.push(trade.levels.target);
     }
     ledger
+}
+
+/// Applies a decision's amendments to every open trade. The callback has just seen those trades,
+/// and the levels first matter on the next bar's scan.
+fn amend_levels(trades: &mut [Trade], signals: BarSignals) {
+    for trade in trades.iter_mut().filter(|trade| trade.open) {
+        if let Some(stop) = signals.amend_stop {
+            trade.levels.stop = stop;
+        }
+        if let Some(target) = signals.amend_target {
+            trade.levels.target = target;
+        }
+    }
+}
+
+/// A resting order needs an entry decision and a positive price, and `expire_bars` is positive.
+fn check_resting(signals: &BarSignals, order: RestingOrder, bar: usize) -> Result<(), CandleError> {
+    if signals.entry == 0 {
+        return Err(CandleError::InvalidSignal {
+            column: "entry",
+            bar,
+            reason: "a resting order needs an entry decision",
+        });
+    }
+    check_positive("entry_price", bar, order.price)?;
+    if order.expire_bars == Some(0) {
+        return Err(CandleError::InvalidSignal {
+            column: "expire_bars",
+            bar,
+            reason: "must be a positive integer",
+        });
+    }
+    Ok(())
+}
+
+fn check_positive(column: &'static str, bar: usize, value: f64) -> Result<(), CandleError> {
+    if value.is_finite() && value > 0.0 {
+        return Ok(());
+    }
+    Err(CandleError::InvalidSignal {
+        column,
+        bar,
+        reason: "must be finite and positive",
+    })
 }
 
 fn check_level(column: &'static str, bar: usize, level: f64) -> Result<(), CandleError> {
