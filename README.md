@@ -94,7 +94,9 @@ Between sections C and D of each tradable bar that is not force-closed:
    through it; a price equal to the target does not fill. A trade opened on this bar skips its first
    price, which is its own fill. A custom tick exit at the same price is evaluated only after the
    protective checks, so a protective fill takes precedence; the first executable event in price
-   order wins, and the walk stops once no positions remain open.
+   order wins. The walk continues while positions or a reachable resting entry remain. A screened
+   custom tick callback also observes prices while flat before a resting fill, with an empty
+   position snapshot, so its forming candle retains every observed price.
 4. **Close.** The trade closes at the triggering fill price, charged its exit-side cost, and its
    time is recorded in `exit_time_us`. A screen pass with no triggering price leaves the trade open.
    A source that returns no prices, or fails, ends the run with `CandleError::IntrabarSource` naming
@@ -161,6 +163,8 @@ is replaced or is cancelled. Resting orders require `intrabar`, `open`, `high` a
   level. An amendment never reaches an entry decided in the same call, never removes a level and
   never changes exit rules or breakeven state. A level already beyond the next open fills at that
   open.
+  Amendments require `intrabar`, `open`, `high` and `low`; the kernel rejects a decision without
+  those inputs rather than accepting levels it cannot enforce.
 - **Same price.** Within one bar's scan, protective exits resolve first, then the custom tick exit,
   then the resting fill. A protective exit and a reversing resting entry on one price therefore
   close, then open. A new trade's levels start on the following price, and it never exits on the

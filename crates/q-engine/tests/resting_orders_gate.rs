@@ -13,6 +13,26 @@ use q_engine::{
     RestingOrder, SignalColumns, Sizing,
 };
 
+#[test]
+fn amendments_require_an_intrabar_source() {
+    let series = Series::hourly(&[(100.0, 100.0, 100.0); 3]);
+    for signals in [
+        BarSignals {
+            amend_stop: Some(95.0),
+            ..BarSignals::default()
+        },
+        BarSignals {
+            amend_target: Some(105.0),
+            ..BarSignals::default()
+        },
+    ] {
+        let error = series
+            .run(&[(0, enter(1)), (1, signals)], None, &Series::config(None))
+            .expect_err("amendments cannot be enforced without trade prices");
+        assert!(matches!(error, CandleError::InvalidConfig { .. }));
+    }
+}
+
 const SECOND: i64 = 1_000_000;
 const MINUTE: i64 = 60 * SECOND;
 const HOUR: i64 = 60 * MINUTE;
