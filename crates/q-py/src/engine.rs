@@ -888,6 +888,7 @@ fn strategy_decision(returned: &Bound<'_, PyAny>) -> Result<BarSignals, Strategy
         strength: tuple.get_item(3)?.extract()?,
         levels,
         entry_price,
+        ..BarSignals::default()
     })
 }
 
