@@ -12,6 +12,14 @@ pub struct BarSignals {
     /// Fill price for an entry queued on this bar, `NaN` for none. `None` keeps the static
     /// `entry_price` column.
     pub entry_price: Option<f64>,
+    /// Places a resting order instead of a market or priced entry. Requires `entry != 0`.
+    pub resting: Option<RestingOrder>,
+    /// Removes the working resting order without placing another.
+    pub cancel_entry: bool,
+    /// Replaces the stop of every open trade the callback saw; `None` keeps it.
+    pub amend_stop: Option<f64>,
+    /// Replaces the target of every open trade the callback saw; `None` keeps it.
+    pub amend_target: Option<f64>,
 }
 
 impl BarSignals {
@@ -23,6 +31,10 @@ impl BarSignals {
             strength: signals.strength[bar],
             levels: None,
             entry_price: None,
+            resting: None,
+            cancel_entry: false,
+            amend_stop: None,
+            amend_target: None,
         }
     }
 }
@@ -39,7 +51,7 @@ pub struct SignalColumns<'a> {
     pub bar_index: Option<&'a [i64]>,
 }
 
-use super::protective::{IntrabarSource, ProtectiveColumns};
+use super::protective::{IntrabarSource, ProtectiveColumns, RestingOrder};
 
 /// Every column one run reads.
 pub struct CandleInputs<'a> {

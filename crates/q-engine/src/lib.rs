@@ -13,8 +13,8 @@ pub use candle::{
     CandleError, CandleInputs, CandleRun, Costs, DayTradeWindow, Decision, DecisionStep,
     DecisionTrace, ExitCallbacks, ExitReason, ExitScreenFn, ExitTickFn, IntrabarPrices,
     IntrabarSource, PositionSnapshot, ProtectiveColumns, QueuedEntry, QueuedExit, RejectedEntries,
-    RuntimeCallbacks, SessionLoader, SessionTickBars, SessionTickError, SessionTicks,
-    SignalColumns, Sizing, StrategyFn, TradeLedger, TradePrices, TradeView,
+    RestingKind, RestingOrder, RuntimeCallbacks, SessionLoader, SessionTickBars, SessionTickError,
+    SessionTicks, SignalColumns, Sizing, StrategyFn, TradeLedger, TradePrices, TradeView,
 };
 pub use exits::{
     ExitBook, ExitDecision, ExitError, ExitInputs, ExitParams, ExitRuleId, ExitRuleSet,

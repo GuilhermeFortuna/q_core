@@ -721,6 +721,103 @@ with tempfile.TemporaryDirectory() as tmpdir:
         assert exc.observed is None and exc.expected is None
     else:
         raise AssertionError("empty interval did not raise IntrabarDataError")
+
+# Resting orders and amendments through the dict form: the ledgers match the Rust gate.
+assert engine.RESTING_ORDERS is True
+ORDER_TIMES = [(10 + b) * HOUR for b in range(4)]
+
+
+def order_run(decisions, bars, intrabar=None, seen=None, **extra):
+    def decide(bar, positions):
+        if seen is not None:
+            seen.append((bar, positions))
+        return decisions.get(bar, {})
+
+    count = len(bars)
+    return engine.run_candle(
+        time_us=np.array(ORDER_TIMES[:count], dtype=np.int64),
+        open=np.array([b[0] for b in bars], dtype=np.float64),
+        high=np.array([b[1] for b in bars], dtype=np.float64),
+        low=np.array([b[2] for b in bars], dtype=np.float64),
+        close=None,
+        entry=np.zeros(count, dtype=np.int8), exit_long=np.zeros(count, dtype=bool),
+        exit_short=np.zeros(count, dtype=bool), strength=np.zeros(count), columns={},
+        initial_capital=1000., point_value=1., costs=None,
+        sizing={"type": "fixed_quantity", "quantity": 1., "scale_by_signal_strength": False},
+        sizing_point_value=1., exit_params={}, force_close_at_end=False,
+        strategy_callback=decide, intrabar=intrabar, **extra,
+    )
+
+
+# A buy stop at 101 fills at the open of 102 when the bar gaps through it.
+run = order_run({0: {"entry": 1, "entry_kind": "stop", "entry_price": 101.}},
+                [(100., 100., 100.), (102., 103., 102.)],
+                intrabar=tape_source({1: [102., 103.]}, []))
+assert run["entry_price"].tolist() == [102.], run["entry_price"]
+assert run["entry_kind"].tolist() == [2]
+assert run["entry_time_us"].tolist() == [11 * HOUR]
+
+# A stop-order trade opened at 101 stops out at 100 on the same bar.
+calls = []
+run = order_run({0: {"entry": 1, "entry_kind": "stop", "entry_price": 101., "stop_price": 100.}},
+                [(100., 100., 100.), (100.5, 101., 100.)],
+                intrabar=tape_source({1: [100.5, 101., 100.5, 100.]}, calls))
+assert run["entry_price"].tolist() == [101.], run["entry_price"]
+assert run["entry_time_us"].tolist() == [11 * HOUR + SECOND]
+assert run["exit_bar"].tolist() == [1]
+assert run["exit_price"].tolist() == [100.]
+assert run["exit_reason_text"] == ["STOP_LOSS"], run["exit_reason_text"]
+assert run["exit_time_us"].tolist() == [11 * HOUR + 3 * SECOND]
+
+# A stop amended to 98 on bar 2 is not triggered by bar 2 and closes the trade on bar 3 at 98.
+calls = []
+run = order_run(
+    {0: {"entry": 1, "stop_price": 95.}, 2: {"amend_stop": 98.}},
+    [(100., 100., 100.), (100., 100., 100.), (100., 100.5, 97.5), (98.5, 99., 97.5)],
+    intrabar=tape_source({3: [98.5, 98.]}, calls),
+)
+assert calls == [3], calls
+assert run["exit_bar"].tolist() == [3]
+assert run["exit_price"].tolist() == [98.], run["exit_price"]
+assert run["exit_reason_text"] == ["STOP_LOSS"]
+assert run["final_stop_price"].tolist() == [98.], run["final_stop_price"]
+
+# Snapshots carry the levels in force when asked. NaN amendments keep a level.
+seen = []
+order_run(
+    {0: {"entry": 1, "stop_price": 95., "target_price": 110.},
+     1: {"amend_stop": NAN, "amend_target": 105.},
+     2: {"amend_stop": 97.}},
+    [(100., 100., 100.)] * 4,
+    intrabar=tape_source({}, []), seen=seen, snapshot_levels=True,
+)
+snapshots = dict(seen)
+assert snapshots[1] == ((0, 1, 1, 100., 1., 95., 110.),), snapshots[1]
+assert snapshots[2] == ((0, 1, 1, 100., 1., 95., 105.),), snapshots[2]
+assert snapshots[3] == ((0, 1, 1, 100., 1., 97., 105.),), snapshots[3]
+seen = []
+order_run({0: {"entry": 1}}, [(100., 100., 100.)] * 3, seen=seen)
+assert dict(seen)[1] == ((0, 1, 1, 100., 1.),), seen
+
+# Invalid dict decisions raise ValueError naming the bar and the key.
+cases = [
+    ({"entry": 1, "bogus": 1}, "bogus"),
+    ({"entry": 1, "entry_kind": "stop"}, "entry_price"),
+    ({"entry": 1, "entry_kind": "oco", "entry_price": 101.}, "entry_kind"),
+    ({"entry": 1, "expire_bars": 2}, "expire_bars"),
+    ({"entry": 1, "entry_kind": "limit", "entry_price": 99., "expire_bars": 0}, "expire_bars"),
+    ({"amend_stop": -1.}, "amend_stop"),
+    ({"entry": 1, "entry_kind": "stop", "entry_price": 101.}, "resting_order"),
+]
+for decision, needle in cases:
+    intrabar = None if needle == "resting_order" else tape_source({}, [])
+    try:
+        order_run({0: decision}, [(100., 100., 100.)] * 2, intrabar=intrabar)
+    except ValueError as exc:
+        assert needle in str(exc), str(exc)
+    else:
+        raise AssertionError(f"accepted invalid decision: {decision}")
+
 print("engine projection checks passed")
 """
 

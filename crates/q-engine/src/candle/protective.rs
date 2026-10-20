@@ -135,6 +135,47 @@ impl Levels {
     }
 }
 
+/// Kind of a resting entry order.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum RestingKind {
+    /// Triggers at or beyond its price, in the direction of the entry.
+    Stop,
+    /// Triggers strictly through its price, against the direction of the entry.
+    Limit,
+}
+
+/// A resting entry order placed by one decision. `expire_bars` counts the bars after the placing
+/// bar on which the order can still fill; `None` keeps it until it fills, is replaced or cancelled.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct RestingOrder {
+    pub kind: RestingKind,
+    pub price: f64,
+    pub expire_bars: Option<usize>,
+}
+
+impl RestingOrder {
+    /// Screen: whether the bar's range can reach the order.
+    pub(crate) fn reached_by_range(self, side: Side, high: f64, low: f64) -> bool {
+        match (side, self.kind) {
+            (Side::Long, RestingKind::Stop) => high >= self.price,
+            (Side::Long, RestingKind::Limit) => low < self.price,
+            (Side::Short, RestingKind::Stop) => low <= self.price,
+            (Side::Short, RestingKind::Limit) => high > self.price,
+        }
+    }
+
+    /// The fill one trade price gives. A stop fills at the first price at or beyond it, at that
+    /// price; a limit fills at its own price once a trade prints strictly beyond it.
+    pub(crate) fn fill_at(self, side: Side, price: f64) -> Option<f64> {
+        match (side, self.kind) {
+            (Side::Long, RestingKind::Stop) => (price >= self.price).then_some(price),
+            (Side::Long, RestingKind::Limit) => (price < self.price).then_some(self.price),
+            (Side::Short, RestingKind::Stop) => (price <= self.price).then_some(price),
+            (Side::Short, RestingKind::Limit) => (price > self.price).then_some(self.price),
+        }
+    }
+}
+
 /// Index of the trade price that touches a priced entry, or `None` when no price reaches it.
 ///
 /// A bar that opens above the price trades down to it, so the touch is the first price at or

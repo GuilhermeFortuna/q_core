@@ -26,18 +26,18 @@
 
 ## Ordered implementation
 
-- [ ] 1. Add `crates/q-engine/tests/resting_orders_gate.rs` covering criteria 1–11 with a counting source. Confirm it fails for the expected reason.
-- [ ] 2. In `candle/protective.rs`, add `RestingOrder { side, kind, price, expires_after }` with pure functions for the range screen and the per-price trigger. Unit-test the boundaries: equal to the price, one step beyond, and a gap open.
-- [ ] 3. In `candle/inputs.rs` and `candle/run.rs`:
+- [x] 1. Add `crates/q-engine/tests/resting_orders_gate.rs` covering criteria 1–11 with a counting source. (Written after the implementation, so the expected failure before the change was not observed.)
+- [x] 2. In `candle/protective.rs`, add `RestingOrder { side, kind, price, expires_after }` with pure functions for the range screen and the per-price trigger. Unit-test the boundaries: equal to the price, one step beyond, and a gap open.
+- [x] 3. In `candle/inputs.rs` and `candle/run.rs`:
   - Extend `BarSignals` with default-none order, cancel and amendment fields.
   - Hold the working order in `run_bars`, with placement in section D after gating, replacement, cancellation and expiry, plus day-trade lapse at force close and at the last bar of a day.
   - Apply amendments to the trades in the callback's snapshot.
-- [ ] 4. Fold the resting fill into `intrabar_fills`: screen the bar on the union of levels, custom screen and order reach; at each price apply protective exits, then the custom exit, then the order fill. A trade opened by the order skips its own price. Route the fill through `open_entry`.
-- [ ] 5. Move the wrong-side rejection after sizing and the cap, for open, priced and resting entries, so `open_entry` decides "skipped" versus "rejected".
-- [ ] 6. Add `entry_kind`, `entry_time_us`, `final_stop_price` and `final_target_price` to `Trade` and `TradeLedger`, and add the levels to `PositionSnapshot`.
-- [ ] 7. Run `cargo test -p q-engine`. The new gate passes, and `candle_engine_gate`, `candle_callback`, `custom_intrabar_exits`, `protective_orders_gate` and `priced_entries_gate` pass with unchanged bodies, apart from a capped-and-wrong-side case if one exists. Commit.
-- [ ] 8. In `crates/q-py/src/engine.rs`: parse the `dict` decision with key-named errors, add `snapshot_levels`, the new result keys and `RESTING_ORDERS`. Add `tests/test_engine.py` cases for criterion 13. Commit.
-- [ ] 9. Document the rules in `README.md`. Run `make check`. Commit.
+- [x] 4. Fold the resting fill into `intrabar_fills`: screen the bar on the union of levels, custom screen and order reach; at each price apply protective exits, then the custom exit, then the order fill. A trade opened by the order skips its own price. Route the fill through `open_entry`.
+- [x] 5. Move the wrong-side rejection after sizing and the cap, for open, priced and resting entries, so `open_entry` decides "skipped" versus "rejected".
+- [x] 6. Add `entry_kind`, `entry_time_us`, `final_stop_price` and `final_target_price` to `Trade` and `TradeLedger`, and add the levels to `PositionSnapshot`.
+- [x] 7. Run `cargo test -p q-engine`. The new gate passes, and `candle_engine_gate`, `candle_callback`, `custom_intrabar_exits`, `protective_orders_gate` and `priced_entries_gate` pass with unchanged bodies, apart from a capped-and-wrong-side case if one exists. Commit.
+- [x] 8. In `crates/q-py/src/engine.rs`: parse the `dict` decision with key-named errors, add `snapshot_levels`, the new result keys and `RESTING_ORDERS`. Add `tests/test_engine.py` cases for criterion 13. Commit.
+- [x] 9. Document the rules in `README.md`. Run `make check`. Commit.
 
 ## Review focus
 

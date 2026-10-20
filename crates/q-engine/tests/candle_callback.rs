@@ -57,6 +57,7 @@ fn callback_sees_filled_positions_and_preserves_static_results() {
             strength: strength[bar],
             levels: None,
             entry_price: None,
+            ..BarSignals::default()
         })
     })
     .unwrap();
