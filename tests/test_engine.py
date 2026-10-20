@@ -586,6 +586,36 @@ except ValueError as exc:
     assert "intrabar" in str(exc) or "exit_screen_callback" in str(exc)
 else:
     raise AssertionError("exit callbacks accepted without an intrabar source")
+
+# Native sources are exposed separately from Python callables and preserve typed data failures.
+assert engine.SESSION_TICK_SOURCE is True
+native_source = engine.SessionTickSource(
+    [None], np.array([0], dtype=np.int64), np.array([10], dtype=np.int64),
+    np.array([11], dtype=np.int64), np.array([100.]), np.array([101.]),
+    np.array([99.]), np.array([100.]),
+)
+try:
+    native_source.prices(0)
+except engine.IntrabarDataError as exc:
+    assert exc.bar == 0 and exc.reason == "missing_session" and exc.session == 0
+    assert exc.observed is None and exc.expected is None
+else:
+    raise AssertionError("missing session did not raise IntrabarDataError")
+
+# `run_candle` dispatches the source natively while checking a later bar's target.
+# The source is deliberately not callable: falling back through Python would fail here.
+native_run_source = engine.SessionTickSource(
+    [None], np.array([0, 0], dtype=np.int64), np.array([10, 11], dtype=np.int64),
+    np.array([11, 12], dtype=np.int64), np.array([100., 100.]), np.array([100., 102.]),
+    np.array([100., 99.]), np.array([100., 101.]),
+)
+try:
+    protective_run([100., 100.], [100., 102.], [100., 99.], [1, 0], [NAN, NAN],
+                   [101., NAN], native_run_source)
+except engine.IntrabarDataError as exc:
+    assert exc.bar == 1 and exc.reason == "missing_session", (exc.bar, exc.reason)
+else:
+    raise AssertionError("run_candle did not call the native source on the screened bar")
 print("engine projection checks passed")
 """
 

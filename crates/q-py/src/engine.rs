@@ -2,8 +2,10 @@
 
 use std::cell::RefCell;
 use std::collections::{BTreeMap, BTreeSet};
+use std::path::{Path, PathBuf};
 
 use numpy::{PyArray1, PyReadonlyArray1};
+use pyo3::create_exception;
 use pyo3::exceptions::{PyTypeError, PyValueError};
 use pyo3::prelude::*;
 use pyo3::types::{PyAnyMethods, PyBool, PyDict, PyList, PyModule, PyModuleMethods, PyTuple};
@@ -15,12 +17,42 @@ use q_engine::{
     tick_day_bounds as tick_day_bounds_rs, BarSignals, CandleConfig, CandleError, CandleInputs,
     Costs, DayTradeWindow, DecisionStep, ExitCallbacks, ExitInputs, ExitParams, ExitRuleId,
     ExitRuleSet, IntrabarPrices, IntrabarSource, ParamValue, PositionKey, PositionSnapshot,
-    ProtectiveColumns, QueuedEntry, RuleState, RuntimeCallbacks, Side, SignalColumns, Sizing,
-    StrategyFn, TickError, TickInputs, TickSizing, TradeView,
+    ProtectiveColumns, QueuedEntry, RuleState, RuntimeCallbacks, SessionLoader, SessionTickBars,
+    SessionTickError, SessionTicks, Side, SignalColumns, Sizing, StrategyFn, TickError, TickInputs,
+    TickSizing, TradeView,
 };
+
+create_exception!(q_core_engine, IntrabarDataError, PyValueError);
+
+fn session_tick_exception(py: Python<'_>, error: SessionTickError) -> PyErr {
+    let message = error.to_string();
+    let (bar, reason, session, observed, expected) = match error {
+        SessionTickError::MissingSession { bar, session } => {
+            (bar, "missing_session", Some(session), None, None)
+        }
+        SessionTickError::Empty { bar } => (bar, "empty", None, None, None),
+        SessionTickError::Mismatch {
+            bar,
+            observed,
+            expected,
+        } => (bar, "mismatch", None, Some(observed), Some(expected)),
+        SessionTickError::Loader { bar, .. } | SessionTickError::InvalidBar { bar, .. } => {
+            (bar, "missing_session", None, None, None)
+        }
+    };
+    let exception = IntrabarDataError::new_err(message);
+    let value = exception.value(py);
+    let _ = value.setattr("bar", bar);
+    let _ = value.setattr("reason", reason);
+    let _ = value.setattr("session", session);
+    let _ = value.setattr("observed", observed);
+    let _ = value.setattr("expected", expected);
+    PyErr::from_value(value.clone().into_any())
+}
 
 type I64Array<'py> = Bound<'py, PyArray1<i64>>;
 type I64Pair<'py> = (I64Array<'py>, I64Array<'py>);
+type TradePriceArrays<'py> = (Bound<'py, PyArray1<i64>>, Bound<'py, PyArray1<f64>>);
 
 enum StrategyRunError {
     Kernel(CandleError),
@@ -529,10 +561,20 @@ fn py_run_candle<'py>(
         .as_ref()
         .map(|a| contiguous_f64("entry_price", a))
         .transpose()?;
-    let source = intrabar.map(|callable| PyIntrabar {
-        callable,
-        error: RefCell::new(None),
-    });
+    let source = if let Some(obj) = intrabar {
+        if obj.is_instance_of::<PySessionTickSource>() {
+            Some(PyIntrabarSource::Session(
+                obj.extract::<PyRef<'py, PySessionTickSource>>()?,
+            ))
+        } else {
+            Some(PyIntrabarSource::Callable(PyIntrabar {
+                callable: obj,
+                error: RefCell::new(None),
+            }))
+        }
+    } else {
+        None
+    };
 
     let tradable_arr = tradable
         .map(|arr| {
@@ -735,10 +777,7 @@ fn py_run_candle<'py>(
         },
     );
     let run = result.map_err(|err| {
-        if let Some(raised) = source
-            .as_ref()
-            .and_then(|source| source.error.borrow_mut().take())
-        {
+        if let Some(raised) = source.as_ref().and_then(PyIntrabarSource::take_error) {
             return raised;
         }
         match err {
@@ -907,6 +946,39 @@ struct PyIntrabar<'py> {
     error: RefCell<Option<PyErr>>,
 }
 
+enum PyIntrabarSource<'py> {
+    Callable(PyIntrabar<'py>),
+    Session(PyRef<'py, PySessionTickSource>),
+}
+
+impl IntrabarSource for PyIntrabarSource<'_> {
+    fn prices(&self, bar: usize) -> Result<IntrabarPrices, String> {
+        match self {
+            PyIntrabarSource::Callable(source) => source.prices(bar),
+            PyIntrabarSource::Session(source) => match source.inner.prices_checked(bar) {
+                Ok(prices) => Ok(prices),
+                Err(error) => {
+                    *source.last_error.lock().unwrap() = Some(error.clone());
+                    Err(error.to_string())
+                }
+            },
+        }
+    }
+}
+impl PyIntrabarSource<'_> {
+    fn take_error(&self) -> Option<PyErr> {
+        match self {
+            Self::Callable(source) => source.error.borrow_mut().take(),
+            Self::Session(source) => source
+                .last_error
+                .lock()
+                .unwrap()
+                .take()
+                .map(|error| session_tick_exception(source.py(), error)),
+        }
+    }
+}
+
 impl IntrabarSource for PyIntrabar<'_> {
     fn prices(&self, bar: usize) -> Result<IntrabarPrices, String> {
         let prices = self.callable.call1((bar,)).and_then(|pair| {
@@ -921,6 +993,89 @@ impl IntrabarSource for PyIntrabar<'_> {
             *self.error.borrow_mut() = Some(err);
             "intrabar callable raised an exception".to_string()
         })
+    }
+}
+
+struct ParquetSessionLoader {
+    paths: Vec<Option<PathBuf>>,
+}
+impl SessionLoader for ParquetSessionLoader {
+    fn load(&self, session: i64) -> Result<Option<q_engine::TradePrices>, String> {
+        let path = self
+            .paths
+            .get(session as usize)
+            .ok_or_else(|| format!("session ordinal {session} is out of range"))?;
+        let Some(path) = path else {
+            return Ok(None);
+        };
+        let data = q_io::read_trade_prices(Path::new(path)).map_err(|e| e.to_string())?;
+        Ok(Some(q_engine::TradePrices {
+            time_msc: data.time_msc,
+            price: data.price,
+        }))
+    }
+}
+
+#[pyclass(name = "SessionTickSource")]
+struct PySessionTickSource {
+    inner: SessionTicks<ParquetSessionLoader>,
+    last_error: std::sync::Mutex<Option<SessionTickError>>,
+}
+
+#[pymethods]
+impl PySessionTickSource {
+    #[new]
+    #[allow(clippy::too_many_arguments)] // Mirrors the documented Python constructor columns.
+    fn new(
+        paths: Vec<Option<String>>,
+        bar_session: PyReadonlyArray1<'_, i64>,
+        bar_start_msc: PyReadonlyArray1<'_, i64>,
+        bar_end_msc: PyReadonlyArray1<'_, i64>,
+        open: PyReadonlyArray1<'_, f64>,
+        high: PyReadonlyArray1<'_, f64>,
+        low: PyReadonlyArray1<'_, f64>,
+        close: PyReadonlyArray1<'_, f64>,
+    ) -> PyResult<Self> {
+        let session = contiguous_i64("bar_session", &bar_session)?.to_vec();
+        for (bar, &ordinal) in session.iter().enumerate() {
+            if ordinal < 0 || ordinal as usize >= paths.len() {
+                return Err(PyValueError::new_err(format!(
+                    "bar_session[{bar}]: ordinal {ordinal} out of range for {} paths",
+                    paths.len()
+                )));
+            }
+        }
+        let loader = ParquetSessionLoader {
+            paths: paths.into_iter().map(|p| p.map(PathBuf::from)).collect(),
+        };
+        let inner = SessionTicks::new(
+            loader,
+            SessionTickBars {
+                session,
+                start_msc: contiguous_i64("bar_start_msc", &bar_start_msc)?.to_vec(),
+                end_msc: contiguous_i64("bar_end_msc", &bar_end_msc)?.to_vec(),
+                open: contiguous_f64("open", &open)?.to_vec(),
+                high: contiguous_f64("high", &high)?.to_vec(),
+                low: contiguous_f64("low", &low)?.to_vec(),
+                close: contiguous_f64("close", &close)?.to_vec(),
+            },
+        )
+        .map_err(PyValueError::new_err)?;
+        Ok(Self {
+            inner,
+            last_error: std::sync::Mutex::new(None),
+        })
+    }
+
+    fn prices<'py>(&self, py: Python<'py>, bar: usize) -> PyResult<TradePriceArrays<'py>> {
+        let prices = self
+            .inner
+            .prices_checked(bar)
+            .map_err(|error| session_tick_exception(py, error))?;
+        Ok((
+            PyArray1::from_vec(py, prices.time_us),
+            PyArray1::from_vec(py, prices.price),
+        ))
     }
 }
 
@@ -1374,6 +1529,8 @@ pub(crate) fn register(parent: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(max_position, &m)?)?;
     m.add_function(wrap_pyfunction!(py_run_candle, &m)?)?;
     m.add_class::<PyDecisionStep>()?;
+    m.add_class::<PySessionTickSource>()?;
+    m.add("IntrabarDataError", m.py().get_type::<IntrabarDataError>())?;
     m.add_function(wrap_pyfunction!(tick_simulate, &m)?)?;
     m.add_function(wrap_pyfunction!(tick_day_bounds, &m)?)?;
     m.add_function(wrap_pyfunction!(tick_bars, &m)?)?;
@@ -1381,6 +1538,7 @@ pub(crate) fn register(parent: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(sample_at_bar_ends, &m)?)?;
     m.add("PROTECTIVE_ORDERS", true)?;
     m.add("BREAKEVEN_INTRABAR", true)?;
+    m.add("SESSION_TICK_SOURCE", true)?;
     parent.add_submodule(&m)?;
     parent
         .py()

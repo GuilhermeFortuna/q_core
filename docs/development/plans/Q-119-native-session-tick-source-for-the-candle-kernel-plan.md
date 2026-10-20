@@ -12,7 +12,7 @@
 - `q-py` exposes `SessionTickSource` and accepts it as `intrabar`.
 
 **Spec:** [Specification](../specs/Q-119-native-session-tick-source-for-the-candle-kernel-spec.md)
-**Status:** written plan awaiting human review.
+**Status:** implementation in progress; Python wheel integration and full `make check` remain to be completed.
 
 ## Global constraints
 
@@ -24,11 +24,12 @@
 
 ## Ordered implementation
 
-- [ ] 1. `q-io`: add `read_trade_prices` beside the bar readers in `src/parquet.rs`, reusing its path checks and error type. Add unit tests for criterion 1 that write files with `tempfile` and the tick schema. Commit.
-- [ ] 2. `q-engine`: add `candle/session_ticks.rs` with `SessionLoader`, `TradePrices` (or a re-export) and `SessionTicks`: one cached session, binary-search slicing, the OHLC check and the three typed errors. Write tests for criteria 3–5 with an in-memory counting loader. Commit.
-- [ ] 3. `q-py`: add the `SessionTickSource` class with argument validation, a `q-io` loader and `prices(bar)`. Make `run_candle`'s `intrabar` accept the class or a callable. Add `IntrabarDataError` with its attributes and the `SESSION_TICK_SOURCE` flag.
+- [x] 1. `q-io`: add `read_trade_prices` beside the bar readers in `src/parquet.rs`, reusing its path checks and error type. Add unit tests for criterion 1 that write files with `tempfile` and the tick schema.
+- [x] 2. `q-engine`: add `candle/session_ticks.rs` with `SessionLoader`, `TradePrices` (or a re-export) and `SessionTicks`: one cached session, binary-search slicing, the OHLC check and the three typed errors. Add a half-open slicing and cache test; missing and mismatch cases still need explicit unit tests.
+- [x] 3. `q-py`: add the `SessionTickSource` class with argument validation, a `q-io` loader and `prices(bar)`. Make `run_candle`'s `intrabar` accept the class or a callable. Add `IntrabarDataError` with its attributes and the `SESSION_TICK_SOURCE` flag.
 - [ ] 4. Add `tests/test_engine.py` cases for criteria 2, 5 and 6, including a spy that proves no Python price call. Commit.
-- [ ] 5. Document in `README.md`. Run `make check`. Commit.
+- [x] 5. Document in `README.md`.
+- [ ] Run `make check` and commit after the remaining Python integration tests pass.
 
 ## Review focus
 
@@ -40,4 +41,4 @@
 
 ## Validation and handoff
 
-Run `cargo test -p q-io -p q-engine`, then `make check`. Record the results and follow-ups in this plan and commit. Then run `./work board set Q-119 in-review -m "<changes; checks and results; follow-ups>"` from the workspace root. The human owns integration and the release; Q-121 pins the published tag.
+Validation so far: focused `cargo test -p q-io -p q-engine` and `cargo clippy -p q-engine -p q-io -p q-py --all-targets -- -D warnings` pass. `make check` was attempted; Python reference targets cannot download locked packages because network/DNS is unavailable, and maturin's `uvx` tool directory needs relocation. The wheel integration tests also cannot run because NumPy is unavailable in the host Python. Complete the criteria 2/5/6 wheel tests, rerun `make check` when dependencies are available, then update the board to In Review.

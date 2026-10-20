@@ -67,6 +67,13 @@ replay but never fills. Rust callers use `q_engine::run_candle_with_callbacks` w
 
 ## Intrabar Protective Orders (`q-engine::candle`)
 
+`q_core.engine.SessionTickSource` can serve candle trade prices directly from tick-store session
+Parquet files. It reads `time_msc` and `last`, filters invalid trade prices, stably orders ticks by
+timestamp when needed, and keeps one session loaded at a time. Per-bar intervals are half-open in
+milliseconds; the source checks the selected prices against each bar's OHLC before returning
+microsecond timestamps to the kernel. Pass the source as `intrabar` to avoid a Python call for each
+bar. Callable sources continue to work as before.
+
 `run_candle` can fill an entry's stop and target inside the bar where they trade. Both levels are
 optional per-bar absolute prices in `protective`: an entry queued on bar `b` carries the levels of
 bar `b`, and `NaN` means no level. Requires `intrabar`, `open`, `high` and `low`; levels must be
@@ -154,10 +161,10 @@ Every responsibility named in §5 of the system architecture is mapped to exactl
 | Crate | Responsibility | Role & Boundary |
 | --- | --- | --- |
 | `q-indicators` | Indicator mathematics | Pure technical indicators, transforms, streaming chart studies, and market context kernels: `realized_vol`, `yang_zhang`, `rsi`, `bollinger_bands`, `macd`, `donchian_channels`, `atr`, `sma`, `ema`, `smma`, `wma`, `hma`, `session_vwap`, `rolling_zscore`, `rolling_rank`, `pct_change`, `clip`, streaming states (`SmaState`, `EmaState`, `BollingerState`, `RsiState`, `AtrState`, `SessionVwapState`, `VolumeState`), and market context analysis (`ContextState`, `batch_context`). Zero I/O, zero system clock or environment access. |
-| `q-engine` | Simulation & execution kernels | Candle and tick kernels, fill model, exit-rule state machines, position sizing. Shared identically by backtesting and live evaluation. |
+| `q-engine` | Simulation & execution kernels | Candle and tick kernels, session tick slicing and OHLC checks through a loader trait, fill model, exit-rule state machines, position sizing. Shared identically by backtesting and live evaluation. |
 | `q-buffers` | Columnar memory buffers & contracts | Columnar ring buffers, streaming bar windows, Arrow memory layouts, and vendored contract types (`contracts/`). |
-| `q-io` | Columnar codecs & readers | Parquet and Arrow codecs and byte decoders. Reads explicitly provided files/buffers; never performs filesystem discovery. |
-| `q-py` | Python native binding | PyO3 projection layer. Exposes `q_core` module and callables to Python. Projection only; contains zero computational semantics. |
+| `q-io` | Columnar codecs & readers | Parquet and Arrow codecs, bar readers, and filtered/sorted session trade-price readers. Reads explicitly provided files/buffers; never performs filesystem discovery. |
+| `q-py` | Python native binding | PyO3 projection layer. Exposes `q_core` module, callables, and the native session tick source to Python. Computational semantics remain in Rust semantic crates. |
 | `q-qt` | Qt native binding | CXX-Qt projection layer. Exposes `CoreInfo` and QObject interfaces to Qt/QML. Projection only; contains zero computational semantics. |
 | `q-parity` | Parity gate & reference fixtures | Test support for reference fixtures, numerical tolerance comparisons, double-run determinism, and prefix causality. `publish = false`; dev-dependency only. |
 

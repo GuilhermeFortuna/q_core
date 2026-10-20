@@ -15,6 +15,13 @@ use q_buffers::{BarColumns, BarFrame, TimeLabel};
 use crate::arrow_ipc::{bar_field_set, format_arrow_type};
 use crate::error::IoError;
 
+/// Trade timestamps and last-traded prices from one tick-store session.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct TradePrices {
+    pub time_msc: Vec<i64>,
+    pub price: Vec<f64>,
+}
+
 /// A half-open positional row range across the listed files, counted as if they
 /// were concatenated. `None` means every row.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -50,6 +57,87 @@ pub fn bar_file_rows(path: &Path) -> Result<usize, IoError> {
     let total_rows = reader.metadata().file_metadata().num_rows();
     usize::try_from(total_rows).map_err(|_| IoError::Arrow {
         detail: "row count exceeds usize".to_string(),
+    })
+}
+
+/// Reads and filters the trade-price columns from one tick-store session file.
+/// Rows with non-finite or non-positive prices are discarded. Out-of-order rows
+/// are stably sorted by timestamp, preserving file order for equal timestamps.
+pub fn read_trade_prices(path: &Path) -> Result<TradePrices, IoError> {
+    check_path_pattern(path)?;
+    let file = File::open(path).map_err(|_| IoError::FileMissing {
+        path: path.display().to_string(),
+    })?;
+    let builder =
+        ParquetRecordBatchReaderBuilder::try_new(file).map_err(|_| IoError::NotParquet {
+            path: path.display().to_string(),
+        })?;
+    let schema = builder.schema();
+    for (name, expected) in [("time_msc", "int64"), ("last", "float64")] {
+        let Some(index) = schema.index_of(name).ok() else {
+            return Err(IoError::TradeColumn {
+                path: path.display().to_string(),
+                name: name.to_string(),
+                expected,
+                found: None,
+            });
+        };
+        let field = schema.field(index);
+        let matches = match name {
+            "time_msc" => field.data_type() == &DataType::Int64,
+            _ => field.data_type() == &DataType::Float64,
+        };
+        if !matches {
+            return Err(IoError::TradeColumn {
+                path: path.display().to_string(),
+                name: name.to_string(),
+                expected,
+                found: Some(format_arrow_type(field.data_type())),
+            });
+        }
+    }
+    let time_idx = schema.index_of("time_msc").unwrap();
+    let price_idx = schema.index_of("last").unwrap();
+    let reader = builder.build().map_err(|e| IoError::Arrow {
+        detail: e.to_string(),
+    })?;
+    let mut rows = Vec::new();
+    for batch in reader {
+        let batch = batch.map_err(|e| IoError::Arrow {
+            detail: e.to_string(),
+        })?;
+        let times = batch
+            .column(time_idx)
+            .as_any()
+            .downcast_ref::<Int64Array>()
+            .unwrap();
+        let prices = batch
+            .column(price_idx)
+            .as_any()
+            .downcast_ref::<Float64Array>()
+            .unwrap();
+        for row in 0..batch.num_rows() {
+            if times.is_null(row) {
+                return Err(IoError::NullValue {
+                    file: Some(path.display().to_string()),
+                    column: "time_msc".into(),
+                    row,
+                });
+            }
+            if !prices.is_null(row) {
+                let price = prices.value(row);
+                if price.is_finite() && price > 0.0 {
+                    rows.push((times.value(row), price));
+                }
+            }
+        }
+    }
+    if rows.windows(2).any(|pair| pair[0].0 > pair[1].0) {
+        rows.sort_by_key(|row| row.0);
+    }
+    Ok(TradePrices {
+        time_msc: rows.iter().map(|row| row.0).collect(),
+        price: rows.iter().map(|row| row.1).collect(),
     })
 }
 
@@ -376,6 +464,36 @@ mod tests {
             writer.write(batch).unwrap();
         }
         writer.close().unwrap();
+    }
+
+    #[test]
+    fn trade_prices_filter_and_stably_sort_session_rows() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("ticks.parquet");
+        let schema = Arc::new(Schema::new(vec![
+            Field::new("time_msc", DataType::Int64, false),
+            Field::new("bid", DataType::Float64, false),
+            Field::new("ask", DataType::Float64, false),
+            Field::new("last", DataType::Float64, true),
+            Field::new("volume", DataType::Float64, false),
+            Field::new("flags", DataType::UInt32, false),
+        ]));
+        let batch = RecordBatch::try_new(
+            schema,
+            vec![
+                Arc::new(Int64Array::from(vec![3, 2, 2, 1, 4, 5])),
+                Arc::new(Float64Array::from(vec![1.; 6])),
+                Arc::new(Float64Array::from(vec![1.; 6])),
+                Arc::new(Float64Array::from(vec![3., 2., 2.5, 0., -1., f64::NAN])),
+                Arc::new(Float64Array::from(vec![1.; 6])),
+                Arc::new(arrow::array::UInt32Array::from(vec![32; 6])),
+            ],
+        )
+        .unwrap();
+        write_parquet_file(&path, &[batch]);
+        let trades = read_trade_prices(&path).unwrap();
+        assert_eq!(trades.time_msc, vec![2, 2, 3]);
+        assert_eq!(trades.price, vec![2., 2.5, 3.]);
     }
 
     fn make_test_batch(

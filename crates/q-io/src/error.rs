@@ -14,6 +14,12 @@ pub enum IoError {
         expected: &'static str,
         found: String,
     },
+    TradeColumn {
+        path: String,
+        name: String,
+        expected: &'static str,
+        found: Option<String>,
+    },
     NullValue {
         file: Option<String>,
         column: String,
@@ -61,6 +67,21 @@ impl std::fmt::Display for IoError {
                     "column `{name}` has type `{found}`, expected `{expected}`"
                 )
             }
+            Self::TradeColumn {
+                path,
+                name,
+                expected,
+                found,
+            } => match found {
+                Some(found) => write!(
+                    f,
+                    "file `{path}` column `{name}` has type `{found}`, expected `{expected}`"
+                ),
+                None => write!(
+                    f,
+                    "file `{path}` is missing column `{name}` (expected `{expected}`)"
+                ),
+            },
             Self::NullValue {
                 file: Some(file),
                 column,

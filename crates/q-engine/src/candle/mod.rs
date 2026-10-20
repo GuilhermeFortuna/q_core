@@ -3,6 +3,7 @@ mod decision;
 mod inputs;
 mod protective;
 mod run;
+mod session_ticks;
 mod sizing;
 
 pub(crate) use config::side_cost;
@@ -14,5 +15,8 @@ pub use run::{
     run_candle, run_candle_with_callback, run_candle_with_callbacks, CandleRun, DecisionTrace,
     ExitCallbacks, ExitReason, ExitScreenFn, ExitTickFn, PositionSnapshot, RuntimeCallbacks,
     StrategyFn, TradeLedger,
+};
+pub use session_ticks::{
+    SessionLoader, SessionTickBars, SessionTickError, SessionTicks, TradePrices,
 };
 pub use sizing::Sizing;
