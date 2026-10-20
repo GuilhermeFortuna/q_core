@@ -49,6 +49,8 @@ def main() -> None:
 CASES = r"""
 import json
 from pathlib import Path
+import shutil
+import tempfile
 
 import numpy as np
 import q_core.engine as engine
@@ -616,6 +618,109 @@ except engine.IntrabarDataError as exc:
     assert exc.bar == 1 and exc.reason == "missing_session", (exc.bar, exc.reason)
 else:
     raise AssertionError("run_candle did not call the native source on the screened bar")
+
+# File decoding failures retain their path and are not mislabeled as missing sessions.
+bad_file_source = engine.SessionTickSource(
+    ["/tmp/q119-session-that-does-not-exist.parquet"], np.array([0], dtype=np.int64),
+    np.array([10], dtype=np.int64), np.array([11], dtype=np.int64), np.array([100.]),
+    np.array([101.]), np.array([99.]), np.array([100.]),
+)
+try:
+    bad_file_source.prices(0)
+except engine.IntrabarDataError:
+    raise AssertionError("Parquet read failure was mislabeled as IntrabarDataError")
+except ValueError as exc:
+    assert "/tmp/q119-session-that-does-not-exist.parquet" in str(exc), str(exc)
+else:
+    raise AssertionError("missing Parquet file did not fail")
+
+# Native reads filter and stably sort a tick-store session, then drive the same
+# protective-order results as the existing Python callable source.
+with tempfile.TemporaryDirectory() as tmpdir:
+    session_path = Path(tmpdir) / "session.parquet"
+    shutil.copyfile(ROOT / "tests" / "fixtures" / "session_ticks.parquet", session_path)
+    parquet_source = engine.SessionTickSource(
+        [str(session_path)], np.array([0, 0], dtype=np.int64),
+        np.array([10, 13], dtype=np.int64), np.array([13, 15], dtype=np.int64),
+        np.array([100., 99.]), np.array([101., 102.]), np.array([100., 99.]),
+        np.array([101., 102.]),
+    )
+    times0, prices0 = parquet_source.prices(0)
+    times1, prices1 = parquet_source.prices(1)
+    raw_time_msc = np.array([12, 10, 11, 11, 13, 14, 15], dtype=np.int64)
+    raw_last = np.array([101., 100., 100.5, 100.75, 99., 102., NAN], dtype=np.float64)
+    valid = np.isfinite(raw_last) & (raw_last > 0)
+    expected_time_msc, expected_last = raw_time_msc[valid], raw_last[valid]
+    if expected_time_msc.size > 1 and np.any(expected_time_msc[1:] < expected_time_msc[:-1]):
+        order = np.argsort(expected_time_msc, kind="stable")
+        expected_time_msc, expected_last = expected_time_msc[order], expected_last[order]
+    np.testing.assert_array_equal(times0, expected_time_msc[expected_time_msc < 13] * 1000)
+    np.testing.assert_array_equal(prices0, expected_last[expected_time_msc < 13])
+    np.testing.assert_array_equal(times1, expected_time_msc[(expected_time_msc >= 13) & (expected_time_msc < 15)] * 1000)
+    np.testing.assert_array_equal(prices1, expected_last[(expected_time_msc >= 13) & (expected_time_msc < 15)])
+    native_run = protective_run(
+        [100., 99.], [101., 102.], [100., 99.], [1, 0], [NAN, NAN],
+        [101.5, NAN], parquet_source,
+    )
+    callable_calls = []
+    def python_source(bar):
+        callable_calls.append(bar)
+        return parquet_source.prices(bar)
+    callable_run = protective_run(
+        [100., 99.], [101., 102.], [100., 99.], [1, 0], [NAN, NAN],
+        [101.5, NAN], python_source,
+    )
+    assert callable_calls == [1], callable_calls
+    assert native_run.keys() == callable_run.keys()
+    for name in native_run:
+        np.testing.assert_equal(native_run[name], callable_run[name], err_msg=name)
+    assert native_run["exit_price"].tolist() == [101.5]
+
+    # Q-105 priced entries use the deciding bar's native tape.
+    native_priced = protective_run(
+        [100.], [101.], [100.], [1], [99.5], [100.6], parquet_source,
+        entry_price=[100.25],
+    )
+    priced_calls = []
+    def python_priced_source(bar):
+        priced_calls.append(bar)
+        return parquet_source.prices(bar)
+    callable_priced = protective_run(
+        [100.], [101.], [100.], [1], [99.5], [100.6], python_priced_source,
+        entry_price=[100.25],
+    )
+    assert priced_calls == [0], priced_calls
+    for name in native_priced:
+        np.testing.assert_equal(native_priced[name], callable_priced[name], err_msg=name)
+    assert native_priced["entry_price"].tolist() == [100.25]
+    assert native_priced["exit_price"].tolist() == [100.6]
+
+    mismatch_source = engine.SessionTickSource(
+        [str(session_path)], np.array([0], dtype=np.int64), np.array([10], dtype=np.int64),
+        np.array([13], dtype=np.int64), np.array([100.]), np.array([101.1]),
+        np.array([100.]), np.array([101.]),
+    )
+    try:
+        mismatch_source.prices(0)
+    except engine.IntrabarDataError as exc:
+        assert exc.bar == 0 and exc.reason == "mismatch" and exc.session is None
+        assert tuple(exc.observed) == (100., 101., 100., 101.)
+        assert tuple(exc.expected) == (100., 101.1, 100., 101.)
+    else:
+        raise AssertionError("OHLC mismatch did not raise IntrabarDataError")
+
+    empty_source = engine.SessionTickSource(
+        [str(session_path)], np.array([0], dtype=np.int64), np.array([15], dtype=np.int64),
+        np.array([16], dtype=np.int64), np.array([100.]), np.array([100.]),
+        np.array([100.]), np.array([100.]),
+    )
+    try:
+        empty_source.prices(0)
+    except engine.IntrabarDataError as exc:
+        assert exc.bar == 0 and exc.reason == "empty" and exc.session is None
+        assert exc.observed is None and exc.expected is None
+    else:
+        raise AssertionError("empty interval did not raise IntrabarDataError")
 print("engine projection checks passed")
 """
 

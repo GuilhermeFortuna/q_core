@@ -269,4 +269,26 @@ mod tests {
             })
         );
     }
+
+    #[test]
+    fn replaces_cached_session_only_when_the_ordinal_changes() {
+        let loads = Arc::new(AtomicUsize::new(0));
+        let source = SessionTicks::new(
+            Loader(loads.clone()),
+            SessionTickBars {
+                session: vec![0, 1, 1],
+                start_msc: vec![10, 10, 12],
+                end_msc: vec![12, 12, 13],
+                open: vec![1.0, 1.0, 1.5],
+                high: vec![2.0, 2.0, 1.5],
+                low: vec![1.0, 1.0, 1.5],
+                close: vec![2.0, 2.0, 1.5],
+            },
+        )
+        .unwrap();
+        source.prices_checked(0).unwrap();
+        source.prices_checked(1).unwrap();
+        source.prices_checked(2).unwrap();
+        assert_eq!(loads.load(Ordering::SeqCst), 2);
+    }
 }

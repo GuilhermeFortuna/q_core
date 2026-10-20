@@ -26,6 +26,12 @@ create_exception!(q_core_engine, IntrabarDataError, PyValueError);
 
 fn session_tick_exception(py: Python<'_>, error: SessionTickError) -> PyErr {
     let message = error.to_string();
+    if matches!(
+        error,
+        SessionTickError::Loader { .. } | SessionTickError::InvalidBar { .. }
+    ) {
+        return PyValueError::new_err(message);
+    }
     let (bar, reason, session, observed, expected) = match error {
         SessionTickError::MissingSession { bar, session } => {
             (bar, "missing_session", Some(session), None, None)
@@ -36,9 +42,7 @@ fn session_tick_exception(py: Python<'_>, error: SessionTickError) -> PyErr {
             observed,
             expected,
         } => (bar, "mismatch", None, Some(observed), Some(expected)),
-        SessionTickError::Loader { bar, .. } | SessionTickError::InvalidBar { bar, .. } => {
-            (bar, "missing_session", None, None, None)
-        }
+        SessionTickError::Loader { .. } | SessionTickError::InvalidBar { .. } => unreachable!(),
     };
     let exception = IntrabarDataError::new_err(message);
     let value = exception.value(py);
