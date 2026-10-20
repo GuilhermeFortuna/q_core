@@ -123,7 +123,50 @@ recorded with the deciding bar as its entry bar. The decision is still traced on
   when the cap has no room for both.
 - Custom intrabar exits do not run on the entry's own bar. They apply from the next bar.
 - Without `entry_price` every output is unchanged. Day-trade windows gate priced entries as they
-  gate every entry, and orders never rest beyond the deciding bar.
+  gate every entry, and priced entries never rest beyond the deciding bar. Resting orders are
+  described below.
+
+## Resting orders and amendments (`q-engine::candle`)
+
+A runtime decision may place one resting entry order in place of a market or priced entry. Its
+`entry_kind` is `stop` or `limit`, and its `entry_price` is the order price, which must be finite
+and positive. `expire_bars` is a positive integer, or none for an order that lasts until it fills,
+is replaced or is cancelled. Resting orders require `intrabar`, `open`, `high` and `low`.
+
+- **Placement.** The order is placed in section D of the deciding bar, after the day-trade entry
+  window. A gated decision places nothing. The order works from the first price of the next bar.
+- **One working order.** Any new entry decision replaces the working order, and `cancel_entry`
+  removes it. A stop fills at the first trade price at or beyond its price, at that price. A limit
+  fills at its own price once a trade prints strictly beyond it, so an equal print does not fill.
+- **Expiry.** An order placed on bar `i` with `expire_bars = k` can fill on bars `i+1` to `i+k`.
+  In day-trade mode a working order also lapses at the force-close bar and after the last bar of
+  the day, so it never carries into the next session.
+- **Reach.** A bar's trade prices are read only when its range reaches the order: a buy stop needs
+  `high >= price`, a buy limit `low < price`, a sell stop `low <= price` and a sell limit
+  `high > price`. A bar the range cannot reach makes no source call.
+- **Fill.** The trade is sized with the capital at that moment and trimmed to the position cap.
+  An order the cap leaves nothing for is consumed without a trade and is not reported as rejected.
+  Otherwise the wrong-side rule is checked against the actual fill price, and a refused order is
+  reported in `rejected` with that price. An entry the sizing rule refuses is still reported when
+  its levels are on the wrong side, as before.
+- **Amendments.** A decision's `amend_stop` and `amend_target` replace the levels of the open trades
+  its callback saw, from the first price of the next bar. `NaN` (`None` in the `dict` form) keeps a
+  level. An amendment never reaches an entry decided in the same call, never removes a level and
+  never changes exit rules or breakeven state. A level already beyond the next open fills at that
+  open.
+- **Same price.** Within one bar's scan, protective exits resolve first, then the custom tick exit,
+  then the resting fill. A protective exit and a reversing resting entry on one price therefore
+  close, then open. A new trade's levels start on the following price, and it never exits on the
+  price that filled it.
+- **Callback form.** The callback may return a `dict` with the keys `entry`, `exit_long`,
+  `exit_short`, `strength`, `stop_price`, `target_price`, `entry_price`, `entry_kind` (`market`,
+  `stop` or `limit`), `expire_bars`, `cancel_entry`, `amend_stop` and `amend_target`. Missing keys
+  take their defaults. An invalid value or an unknown key raises `ValueError` naming the bar and
+  the key. `engine.RESTING_ORDERS` is `True`.
+- **Ledger.** Trades gain `entry_kind` (`0` open fill, `1` priced, `2` stop order, `3` limit order),
+  `entry_time_us` (the time of the price that filled a resting order, otherwise `-1`), and
+  `final_stop_price` and `final_target_price`, the levels in force when the trade closed. With
+  `snapshot_levels=True`, each position tuple also carries the trade's current stop and target.
 
 ## Crate Responsibilities
 
