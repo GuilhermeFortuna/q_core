@@ -12,7 +12,7 @@
 - `q-py` exposes `SessionTickSource` and accepts it as `intrabar`.
 
 **Spec:** [Specification](../specs/Q-119-native-session-tick-source-for-the-candle-kernel-spec.md)
-**Status:** written plan awaiting human review.
+**Status:** implementation complete; canonical `make check` is blocked by unavailable Python packages/network.
 
 ## Global constraints
 
@@ -24,11 +24,12 @@
 
 ## Ordered implementation
 
-- [ ] 1. `q-io`: add `read_trade_prices` beside the bar readers in `src/parquet.rs`, reusing its path checks and error type. Add unit tests for criterion 1 that write files with `tempfile` and the tick schema. Commit.
-- [ ] 2. `q-engine`: add `candle/session_ticks.rs` with `SessionLoader`, `TradePrices` (or a re-export) and `SessionTicks`: one cached session, binary-search slicing, the OHLC check and the three typed errors. Write tests for criteria 3–5 with an in-memory counting loader. Commit.
-- [ ] 3. `q-py`: add the `SessionTickSource` class with argument validation, a `q-io` loader and `prices(bar)`. Make `run_candle`'s `intrabar` accept the class or a callable. Add `IntrabarDataError` with its attributes and the `SESSION_TICK_SOURCE` flag.
-- [ ] 4. Add `tests/test_engine.py` cases for criteria 2, 5 and 6, including a spy that proves no Python price call. Commit.
-- [ ] 5. Document in `README.md`. Run `make check`. Commit.
+- [x] 1. `q-io`: add `read_trade_prices` beside the bar readers in `src/parquet.rs`, reusing its path checks and error type. Add unit tests for criterion 1 that write files with `tempfile` and the tick schema.
+- [x] 2. `q-engine`: add `candle/session_ticks.rs` with `SessionLoader`, `TradePrices` (or a re-export) and `SessionTicks`: one cached session, binary-search slicing, the OHLC check and the three typed errors. Cover half-open slicing, cache reuse/reload, empty intervals and OHLC mismatch with an in-memory loader.
+- [x] 3. `q-py`: add the `SessionTickSource` class with argument validation, a `q-io` loader and `prices(bar)`. Make `run_candle`'s `intrabar` accept the class or a callable. Add `IntrabarDataError` with its attributes and the `SESSION_TICK_SOURCE` flag.
+- [x] 4. Add `tests/test_engine.py` cases for filtering/stable ordering, all three typed errors, Q-102 protective fills and Q-105 priced entries. Confirm the native source is accepted as a non-callable and compare its results with the callable source.
+- [x] 5. Document in `README.md`.
+- [ ] Run the full `make check` when the pinned Python packages are available; the required build, test, lint and Qt harness commands have been run individually where possible.
 
 ## Review focus
 
@@ -40,4 +41,4 @@
 
 ## Validation and handoff
 
-Run `cargo test -p q-io -p q-engine`, then `make check`. Record the results and follow-ups in this plan and commit. Then run `./work board set Q-119 in-review -m "<changes; checks and results; follow-ups>"` from the workspace root. The human owns integration and the release; Q-121 pins the published tag.
+Validation: `cargo fmt --all --check`, workspace Clippy (`cargo clippy --workspace --all-targets -- -D warnings`), and `cargo test --workspace` pass. `make qt-test` passes when Cargo output and the worktree's temporary `target` link are both directed to the writable `/tmp` build directory. The `tests/test_engine.py` wheel case body passes against a locally built `q-py` extension using `/usr/bin/python3`; the existing `make wheel-test` wrapper is unavailable because `uvx maturin` cannot reach PyPI. `make check` was attempted and its Python reference targets cannot download pinned `pandas`, `tzdata`, and related packages while DNS/network is unavailable. Run full `make check` once package access is restored.
