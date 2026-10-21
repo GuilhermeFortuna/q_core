@@ -9,9 +9,59 @@ use std::collections::BTreeMap;
 use q_engine::{
     run_candle_with_callbacks, BarSignals, CandleConfig, CandleError, CandleInputs, CandleRun,
     ExitCallbacks, ExitParams, ExitReason, ExitScreenFn, ExitTickFn, IntrabarPrices,
-    IntrabarSource, PositionSnapshot, ProtectiveColumns, RuntimeCallbacks, SignalColumns, Sizing,
-    StrategyFn,
+    IntrabarSource, PositionSnapshot, ProtectiveColumns, RestingKind, RestingOrder,
+    RuntimeCallbacks, SignalColumns, Sizing, StrategyFn,
 };
+
+#[test]
+fn a_screened_scan_observes_ticks_while_flat_before_a_resting_fill() {
+    let series = Series::hourly(&[
+        (100.0, 100.0, 100.0),
+        (100.0, 100.0, 100.0),
+        (100.0, 100.0, 96.0),
+    ])
+    .enter(0, 1)
+    .levels(0, 98.0, f64::NAN);
+    let tape = Tape::new(&[(2, &[100.0, 98.0, 97.0, 96.0])]);
+    let mut strategy = |bar: usize, _: &[PositionSnapshot]| {
+        Ok::<_, CandleError>(if bar == 1 {
+            BarSignals {
+                entry: -1,
+                strength: 1.0,
+                resting: Some(RestingOrder {
+                    kind: RestingKind::Stop,
+                    price: 97.0,
+                    expire_bars: None,
+                }),
+                ..BarSignals::default()
+            }
+        } else {
+            BarSignals {
+                entry: if bar == 0 { 1 } else { 0 },
+                strength: 1.0,
+                ..BarSignals::default()
+            }
+        })
+    };
+    let seen = RefCell::new(Vec::new());
+    let mut screen = |bar: usize, _: &[PositionSnapshot]| Ok::<_, CandleError>(bar == 2);
+    let mut tick = |_: usize, tick: usize, _: i64, _: f64, positions: &[PositionSnapshot]| {
+        seen.borrow_mut().push((tick, positions.len()));
+        Ok::<_, CandleError>(false)
+    };
+    let result = run(
+        &series,
+        Some(&tape),
+        Some(&mut strategy),
+        Some(ExitCallbacks {
+            screen: &mut screen,
+            tick: &mut tick,
+        }),
+    )
+    .unwrap();
+    assert_eq!(result.trades.entry_bar, vec![1, 2]);
+    assert_eq!(*seen.borrow(), vec![(0, 1), (1, 0), (2, 0), (3, 1)]);
+}
 
 const HOUR: i64 = 3_600_000_000;
 const SECOND: i64 = 1_000_000;
