@@ -515,7 +515,7 @@ unreached = callback_run(
         {"entry": 1, "strength": 1.} if bar == 0 else
         {"exit_long": True, "exit_price": 102.} if bar == 2 else {}
     ),
-    intrabar=tape_source({2: [105., 103., 101.]}, []),
+    intrabar=tape_source({2: [105., 103., 102.5]}, []),
 )
 assert unreached["exit_bar"].tolist() == [-1]
 
