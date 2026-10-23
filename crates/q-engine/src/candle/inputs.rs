@@ -20,6 +20,8 @@ pub struct BarSignals {
     pub amend_stop: Option<f64>,
     /// Replaces the target of every open trade the callback saw; `None` keeps it.
     pub amend_target: Option<f64>,
+    /// Price at which a same-decision signal close may fill intrabar; `None` means next open.
+    pub exit_price: Option<f64>,
 }
 
 impl BarSignals {
@@ -35,6 +37,7 @@ impl BarSignals {
             cancel_entry: false,
             amend_stop: None,
             amend_target: None,
+            exit_price: None,
         }
     }
 }

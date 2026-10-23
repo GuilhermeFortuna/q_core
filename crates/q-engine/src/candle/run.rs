@@ -226,6 +226,78 @@ fn close_all(
     }
 }
 
+/// Applies a decision's explicitly priced signal close after this bar's protective scan. The
+/// close consumes the decision even when the tape never reaches the requested price.
+#[allow(
+    clippy::too_many_arguments,
+    reason = "the close reads the decision, its callback signal, tape, costs and running capital"
+)]
+fn priced_signal_exit(
+    trades: &mut [Trade],
+    decision: &Decision,
+    signals: BarSignals,
+    bar: usize,
+    requested: f64,
+    inputs: &CandleInputs<'_>,
+    config: &CandleConfig,
+    capital: &mut f64,
+) -> Result<bool, CandleError> {
+    let selected = decision.exits.iter().find(|exit| exit.rule.is_none());
+    let Some(selected) = selected else {
+        return Ok(false);
+    };
+    let index = selected.key.0 as usize;
+    let Some(selected_trade) = trades.get(index) else {
+        return Ok(false);
+    };
+    let side = selected_trade.side;
+    let requested_by_signal = match side {
+        Side::Long => signals.exit_long,
+        Side::Short => signals.exit_short,
+    };
+    if !requested_by_signal {
+        return Ok(false);
+    }
+
+    let source = inputs.intrabar.ok_or(CandleError::InvalidConfig {
+        field: "exit_price",
+        reason: "requires intrabar, open, high and low".to_string(),
+    })?;
+    let prices = intrabar_prices(source, bar)?;
+    for trade in trades
+        .iter_mut()
+        .filter(|trade| trade.open && trade.side == side)
+    {
+        let fill_time = match trade.kind {
+            EntryKind::Stop | EntryKind::Limit => trade.entry_time_us,
+            EntryKind::Priced => prices
+                .time_us
+                .get(trade.first_tick)
+                .copied()
+                .unwrap_or(i64::MAX),
+            EntryKind::Open => inputs.time_us[bar],
+        };
+        let first_time = inputs.time_us[bar].max(fill_time);
+        let crossing = prices
+            .time_us
+            .iter()
+            .zip(&prices.price)
+            .find(|(time, price)| {
+                **time >= first_time
+                    && match side {
+                        Side::Long => **price <= requested,
+                        Side::Short => **price >= requested,
+                    }
+            });
+        if let Some((&time_us, &price)) = crossing {
+            let pnl = close_trade(trade, bar, price, ExitReason::Signal, config);
+            trade.exit_time_us = time_us;
+            *capital += pnl;
+        }
+    }
+    Ok(true)
+}
+
 /// `row.get("open", row.get("close", 0.0))`: a present column is read even where it is NaN.
 fn fill_price(inputs: &CandleInputs<'_>, bar: usize) -> f64 {
     match inputs.open {
@@ -256,33 +328,17 @@ pub struct PositionSnapshot {
 }
 
 pub type StrategyFn<'a, E> = dyn FnMut(usize, &[PositionSnapshot]) -> Result<BarSignals, E> + 'a;
-pub type ExitScreenFn<'a, E> = dyn FnMut(usize, &[PositionSnapshot]) -> Result<bool, E> + 'a;
-pub type ExitTickFn<'a, E> =
-    dyn FnMut(usize, usize, i64, f64, &[PositionSnapshot]) -> Result<bool, E> + 'a;
 
 /// Host decisions consulted during a run. Absent callbacks leave the static columns in charge.
 pub struct RuntimeCallbacks<'a, E> {
     /// Closed-bar decisions, called once per bar after intrabar fills.
     pub strategy: Option<&'a mut StrategyFn<'a, E>>,
-    pub exit: Option<ExitCallbacks<'a, E>>,
 }
 
 impl<E> Default for RuntimeCallbacks<'_, E> {
     fn default() -> Self {
-        Self {
-            strategy: None,
-            exit: None,
-        }
+        Self { strategy: None }
     }
-}
-
-/// Custom intrabar exit. `screen` is called once per candle with open positions and decides
-/// whether the candle's trade prices are replayed. `tick` is called for each price of a screened
-/// candle, as `(bar, tick, time_us, price, positions)`, and returning `true` closes the open
-/// trades at that price. A trade opened on this bar cannot close on its own entry tick.
-pub struct ExitCallbacks<'a, E> {
-    pub screen: &'a mut ExitScreenFn<'a, E>,
-    pub tick: &'a mut ExitTickFn<'a, E>,
 }
 
 pub fn run_candle(
@@ -308,7 +364,6 @@ where
         config,
         RuntimeCallbacks {
             strategy: Some(&mut callback as &mut StrategyFn<'_, E>),
-            exit: None,
         },
     )
 }
@@ -334,13 +389,6 @@ fn run_with_callbacks<E: From<CandleError>>(
     callbacks: RuntimeCallbacks<'_, E>,
 ) -> Result<CandleRun, E> {
     validate(inputs, config)?;
-    if callbacks.exit.is_some() && !intrabar_ready(inputs) {
-        return Err(CandleError::InvalidConfig {
-            field: "exit_screen_callback",
-            reason: "requires intrabar, open, high and low".to_string(),
-        }
-        .into());
-    }
     match inputs.close {
         Some(close) => run_bars(inputs, config, close, callbacks),
         None => {
@@ -401,6 +449,33 @@ fn strategy_signals<E: From<CandleError>>(
     }
     if let Some(target) = signals.amend_target {
         check_positive("amend_target", bar, target)?;
+    }
+    if let Some(price) = signals.exit_price.filter(|price| !price.is_nan()) {
+        check_positive("exit_price", bar, price)?;
+        let (Some(_), Some(high), Some(low)) = (inputs.open, inputs.high, inputs.low) else {
+            return Err(CandleError::InvalidSignal {
+                column: "exit_price",
+                bar,
+                reason: "requires intrabar, open, high and low",
+            }
+            .into());
+        };
+        if inputs.intrabar.is_none() {
+            return Err(CandleError::InvalidSignal {
+                column: "exit_price",
+                bar,
+                reason: "requires intrabar, open, high and low",
+            }
+            .into());
+        }
+        if !(low[bar] <= price && price <= high[bar]) {
+            return Err(CandleError::InvalidSignal {
+                column: "exit_price",
+                bar,
+                reason: "must lie within the bar's low and high",
+            }
+            .into());
+        }
     }
     if !(-1..=1).contains(&signals.entry) {
         return Err(CandleError::InvalidSignal {
@@ -535,9 +610,8 @@ where
                     );
                 }
 
-                // Intrabar stops, targets, custom exits and the resting fill share one scan of this
-                // bar's trade prices, ahead of section D.
-                let exit = callbacks.exit.as_mut();
+                // Intrabar stops, targets and the resting fill share one scan of this bar's trade
+                // prices, ahead of section D.
                 intrabar_fills(
                     &mut trades,
                     &mut working,
@@ -546,7 +620,6 @@ where
                     inputs,
                     config,
                     &mut capital,
-                    exit,
                 )?;
 
                 let runtime_signals = strategy_signals(&mut callbacks, bar, &trades, inputs)?;
@@ -567,11 +640,29 @@ where
                     last_bar_of_day,
                     runtime_signals,
                 );
+                let mut immediate_exit = false;
+                if let Some(signals) = runtime_signals {
+                    if let Some(price) = signals.exit_price.filter(|price| !price.is_nan()) {
+                        immediate_exit = priced_signal_exit(
+                            &mut trades,
+                            &decided,
+                            signals,
+                            bar,
+                            price,
+                            inputs,
+                            config,
+                            &mut capital,
+                        )?;
+                    }
+                }
                 // A cancel removes the working order. Any entry decided here replaces it.
                 if runtime_signals.is_some_and(|signals| signals.cancel_entry) {
                     working = None;
                 }
                 queued = decided.clone();
+                if immediate_exit {
+                    queued.exits.clear();
+                }
                 queued_exempt = None;
                 // The levels and price are read from this bar only when it decides an entry.
                 queued_levels = if decided.entry.is_some() {
@@ -687,18 +778,18 @@ where
     })
 }
 
-/// Between sections C and D: stops, targets, custom exits and a resting fill resolve in one scan
-/// of the bar's trade prices, so the first executable event in price order wins.
+/// Between sections C and D: stops, targets and a resting fill resolve in one scan of the bar's
+/// trade prices, so the first executable event in price order wins.
 ///
 /// The range screen decides whether the bar's prices are asked for at all. A trade whose levels
 /// the range cannot reach never fills here, and neither does a working order the range cannot
 /// reach. A trade opened on this bar skips its own fill price. At each price a protective fill
-/// takes precedence over the custom exit, and both precede a resting fill.
+/// takes precedence over a resting fill.
 #[allow(
     clippy::too_many_arguments,
-    reason = "the scan reads the bar's state, its costs, the working order and the host's exit callbacks"
+    reason = "the scan reads the bar's state, its costs and the working order"
 )]
-fn intrabar_fills<E: From<CandleError>>(
+fn intrabar_fills(
     trades: &mut Vec<Trade>,
     working: &mut Option<Working>,
     rejected: &mut RejectedEntries,
@@ -706,8 +797,7 @@ fn intrabar_fills<E: From<CandleError>>(
     inputs: &CandleInputs<'_>,
     config: &CandleConfig,
     capital: &mut f64,
-    exit: Option<&mut ExitCallbacks<'_, E>>,
-) -> Result<(), E> {
+) -> Result<(), CandleError> {
     let (Some(source), Some(high), Some(low)) = (inputs.intrabar, inputs.high, inputs.low) else {
         return Ok(());
     };
@@ -717,11 +807,6 @@ fn intrabar_fills<E: From<CandleError>>(
         return Ok(());
     }
 
-    let mut exit = exit;
-    let screened = match exit.as_mut() {
-        Some(exit) if any_open => (exit.screen)(bar, &snapshot(trades))?,
-        _ => false,
-    };
     let mut reached: Vec<bool> = trades
         .iter()
         .map(|trade| trade.open && reached_by_range(trade, high, low, config))
@@ -729,13 +814,12 @@ fn intrabar_fills<E: From<CandleError>>(
     let order_reached = working
         .as_ref()
         .is_some_and(|order| order.reached_by_range(high, low));
-    if !screened && !order_reached && !reached.contains(&true) {
+    if !order_reached && !reached.contains(&true) {
         return Ok(());
     }
 
     let prices = intrabar_prices(source, bar)?;
 
-    let mut tick_exit = if screened { exit } else { None };
     for (tick, (&time_us, &price)) in prices.time_us.iter().zip(&prices.price).enumerate() {
         for (index, trade) in trades.iter_mut().enumerate() {
             if !trade.open || !reached[index] || trade.skips_tick(bar, tick) {
@@ -753,21 +837,6 @@ fn intrabar_fills<E: From<CandleError>>(
         if !open_now && !(order_reached && working.is_some()) {
             break;
         }
-        // A screened callback observes the whole continuing scan, including a flat interval
-        // before a resting entry fills. Hosts need those prices to build the forming candle.
-        if let Some(exit) = tick_exit.as_mut() {
-            if (exit.tick)(bar, tick, time_us, price, &snapshot(trades))? {
-                for trade in trades
-                    .iter_mut()
-                    .filter(|trade| trade.open && !trade.skips_tick(bar, tick))
-                {
-                    let pnl = close_trade(trade, bar, price, ExitReason::Signal, config);
-                    trade.exit_time_us = time_us;
-                    *capital += pnl;
-                }
-            }
-        }
-
         // The resting fill comes after the exits on the same price. Its trade's levels start on
         // the next price, so this one is not checked against them.
         let fill = if order_reached {
