@@ -563,12 +563,12 @@ except ValueError as exc:
 else:
     raise AssertionError("non-positive runtime level accepted")
 try:
-    callback_run(strategy_callback=lambda bar, positions: (0, False, False, 0., 1., 2., 3., 4.),
+    callback_run(strategy_callback=lambda bar, positions: (0, False, False, 0., 1., 2., 3., 4., 5.),
                  intrabar=tape_source({}, []))
 except TypeError as exc:
-    assert "four, six or seven" in str(exc)
+    assert "four, six, seven or eight" in str(exc)
 else:
-    raise AssertionError("eight-value decision accepted")
+    raise AssertionError("nine-value decision accepted")
 
 # Priced entries: the ledgers of priced_entries_gate.rs criteria 1 and 4, and the range error.
 out = protective_run(
