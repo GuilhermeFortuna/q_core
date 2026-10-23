@@ -15,8 +15,7 @@ pub use protective::{
 };
 pub use run::{
     run_candle, run_candle_with_callback, run_candle_with_callbacks, CandleRun, DecisionTrace,
-    ExitCallbacks, ExitReason, ExitScreenFn, ExitTickFn, PositionSnapshot, RuntimeCallbacks,
-    StrategyFn, TradeLedger,
+    ExitReason, PositionSnapshot, RuntimeCallbacks, StrategyFn, TradeLedger,
 };
 pub use session_ticks::{
     SessionLoader, SessionTickBars, SessionTickError, SessionTicks, TradePrices,

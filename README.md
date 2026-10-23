@@ -52,18 +52,19 @@ extra values the static columns apply. Entry is `-1`, `0`, or `1`, exit flags ar
 strength must be finite and within `[0, 1]`, and levels and prices must be `NaN` or finite and
 positive. Runtime levels need the `intrabar` source, as static ones do. Invalid decisions or
 callback exceptions abort the run. Callback runs own copies of input arrays so host mutations
-cannot change the simulation. Calls without these arguments retain the static signal path. This
-native extension requires no contract or Qt API changes.
+cannot change the simulation. An eight-value tuple may append `exit_price` after `entry_price`;
+the `dict` form can set `exit_price` directly. Calls without runtime arguments retain the static
+signal path. This native extension requires no contract or Qt API changes.
 
-Custom intrabar exits are requested with `exit_screen_callback` and `exit_tick_callback`,
-which must be passed together and require `intrabar`. The screen receives
-`(bar, positions)` and returns a bool; it is called once per candle with open positions, after
-queued fills and before intrabar processing, and flat candles are never screened. A `True` screen
-loads that candle's trade prices. The tick receives `(bar, tick, time_us, price, positions)` for
-each price in order and returns a bool; `True` closes every open trade at that traded price,
-except a trade opened on this same tick. A screen is conservative: a false positive costs a
-replay but never fills. Rust callers use `q_engine::run_candle_with_callbacks` with
-`RuntimeCallbacks { strategy, exit }`.
+The callback `dict` may include `exit_price` alongside `exit_long` or `exit_short` to request an
+explicit close. It requires `intrabar`, `open`, `high` and `low`; the finite positive price must
+lie inside that bar's range. The kernel first applies protective fills, then scans the bar's
+trades in stored order from the bar open or the position's fill time, whichever is later. A long
+closes at the first trade at or below the requested price; a short closes at the first trade at
+or above it. The fill uses that trade's price and timestamp. If no trade reaches the price, the
+position stays open and the decision does not fall back to a next-open close. Without
+`exit_price`, signal closes still fill at the next bar's open. Rust callbacks set
+`BarSignals::exit_price`.
 
 ## Intrabar Protective Orders (`q-engine::candle`)
 
@@ -86,19 +87,15 @@ Between sections C and D of each tradable bar that is not force-closed:
    short needs `stop > fill` and `target < fill`. Only the levels that are set are checked.
 2. **Screen.** A long's stop is reached when `low <= stop` and its target when `high > target`; a
    short's stop when `high >= stop` and its target when `low < target`. The source is called only
-   when some open trade's level passes the screen or the custom exit screen qualifies, and at most
-   once per bar.
+   when some open trade's level passes the screen, and at most once per bar.
 3. **Walk.** The bar's trade prices are walked once, in order. At each price, screened trades are
    checked for their stop (first, then target) and a stop fills at the traded price, so a bar that
    opens past the level fills at its open. A target fills at its level once a price trades strictly
    through it; a price equal to the target does not fill. A trade opened on this bar skips its first
-   price, which is its own fill. A custom tick exit at the same price is evaluated only after the
-   protective checks, so a protective fill takes precedence; the first executable event in price
-   order wins. The walk continues while positions or a reachable resting entry remain. A screened
-   custom tick callback also observes prices while flat before a resting fill, with an empty
-   position snapshot, so its forming candle retains every observed price.
+   price, which is its own fill. Protective exits resolve before a resting fill at the same price.
+   The walk continues while positions or a reachable resting entry remain.
 4. **Close.** The trade closes at the triggering fill price, charged its exit-side cost, and its
-   time is recorded in `exit_time_us`. A screen pass with no triggering price leaves the trade open.
+   time is recorded in `exit_time_us`. A scan with no triggering price leaves the trade open.
    A source that returns no prices, or fails, ends the run with `CandleError::IntrabarSource` naming
    the bar.
 
@@ -165,15 +162,15 @@ is replaced or is cancelled. Resting orders require `intrabar`, `open`, `high` a
   open.
   Amendments require `intrabar`, `open`, `high` and `low`; the kernel rejects a decision without
   those inputs rather than accepting levels it cannot enforce.
-- **Same price.** Within one bar's scan, protective exits resolve first, then the custom tick exit,
-  then the resting fill. A protective exit and a reversing resting entry on one price therefore
+- **Same price.** Within one bar's scan, protective exits resolve before the resting fill. A
+  protective exit and a reversing resting entry on one price therefore
   close, then open. A new trade's levels start on the following price, and it never exits on the
   price that filled it.
 - **Callback form.** The callback may return a `dict` with the keys `entry`, `exit_long`,
   `exit_short`, `strength`, `stop_price`, `target_price`, `entry_price`, `entry_kind` (`market`,
-  `stop` or `limit`), `expire_bars`, `cancel_entry`, `amend_stop` and `amend_target`. Missing keys
-  take their defaults. An invalid value or an unknown key raises `ValueError` naming the bar and
-  the key. `engine.RESTING_ORDERS` is `True`.
+  `stop` or `limit`), `expire_bars`, `cancel_entry`, `amend_stop`, `amend_target` and `exit_price`.
+  Missing keys take their defaults. An invalid value or an unknown key raises `ValueError` naming
+  the bar and key. `engine.RESTING_ORDERS` is `True`.
 - **Ledger.** Trades gain `entry_kind` (`0` open fill, `1` priced, `2` stop order, `3` limit order),
   `entry_time_us` (the time of the price that filled a resting order, otherwise `-1`), and
   `final_stop_price` and `final_target_price`, the levels in force when the trade closed. With
@@ -196,7 +193,7 @@ at the first observed trade price at or beyond it, with the tick timestamp and r
 `breakeven_emergency` or `breakeven`. Gaps can exceed the stop level. Activation is never
 inferred from a later candle extreme. Priced entries ignore prices before and at their entry
 touch; queued entries start protection after their opening print. Explicit protective orders
-take precedence at a shared tick, followed by breakeven, then custom intrabar exits.
+take precedence at a shared tick, followed by breakeven.
 
 An intrabar source and open/high/low columns are mandatory in this mode. Source failures abort
 the run. Omitting the new emergency parameter from a low-level call retains the historical

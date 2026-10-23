@@ -462,6 +462,32 @@ except RuntimeError as exc:
     assert exc is marker
 else:
     raise AssertionError("callback exception swallowed")
+
+# Explicit exit prices close on the first qualifying trade after the closed-bar decision.
+exit_calls = []
+def explicit_exit(bar, positions):
+    if bar == 0:
+        return {"entry": 1, "strength": 1.}
+    if bar == 2:
+        return {"exit_long": True, "exit_price": 103.}
+    return {}
+explicit_exit_run = engine.run_candle(
+    time_us=np.array([10 * HOUR, 11 * HOUR, 12 * HOUR, 13 * HOUR], dtype=np.int64),
+    open=np.array([100., 100., 100., 120.]), high=np.array([100., 100., 106., 120.]),
+    low=np.array([100., 100., 99., 120.]), close=None,
+    entry=np.array([1, 0, 0, 0], dtype=np.int8), exit_long=np.zeros(4, dtype=bool),
+    exit_short=np.zeros(4, dtype=bool), strength=np.array([1., 0., 0., 0.]), columns={},
+    initial_capital=1000., point_value=1., costs=None,
+    sizing={"type": "fixed_quantity", "quantity": 1., "scale_by_signal_strength": False},
+    sizing_point_value=1., exit_params={}, force_close_at_end=False,
+    strategy_callback=explicit_exit,
+    intrabar=tape_source({2: [105., 103., 101.]}, exit_calls),
+)
+assert explicit_exit_run["exit_price"].tolist() == [103.]
+assert explicit_exit_run["exit_time_us"].tolist() == [12 * HOUR + SECOND]
+assert explicit_exit_run["exit_reason_text"] == ["SIGNAL"]
+assert exit_calls == [2]
+
 for decision in [(2, False, False, 0.), (1, False, False, float("nan")), (0, 1, False, 0.), None]:
     try:
         engine.run_candle(**callback_kwargs, strategy_callback=lambda *args: decision)
@@ -469,7 +495,7 @@ for decision in [(2, False, False, 0.), (1, False, False, float("nan")), (0, 1, 
         pass
     else:
         raise AssertionError(f"accepted invalid callback decision: {decision}")
-# Custom exits: the screen selects candidates and the tick confirms the first executable price.
+# Shared runtime-callback candle fixture for priced entries and protection.
 def callback_run(strategy_callback=None, bar_two_low=99., **extra):
     return engine.run_candle(
         time_us=np.array([(10 + b) * HOUR for b in range(4)], dtype=np.int64),
@@ -482,19 +508,38 @@ def callback_run(strategy_callback=None, bar_two_low=99., **extra):
         sizing_point_value=1., exit_params={}, force_close_at_end=False,
         strategy_callback=strategy_callback, **extra,
     )
-calls, screened, ticked = [], [], []
-run = callback_run(
-    intrabar=tape_source({2: [101., 104., 105., 106.]}, calls),
-    exit_screen_callback=lambda bar, positions: screened.append((bar, len(positions))) or bar == 2,
-    exit_tick_callback=lambda bar, tick, time_us, price, positions: ticked.append((bar, tick, price)) or price >= 105.,
-)
-assert run["exit_price"].tolist() == [105.], run["exit_price"]
-assert run["exit_reason_text"] == ["SIGNAL"]
-assert run["exit_time_us"].tolist() == [12 * HOUR + 2 * SECOND]
-assert calls == [2], calls
-assert screened == [(1, 1), (2, 1)], screened
-assert ticked == [(2, 0, 101.), (2, 1, 104.), (2, 2, 105.)], ticked
 
+# A price the tape never reaches consumes this decision without a next-open fallback.
+unreached = callback_run(
+    strategy_callback=lambda bar, positions: (
+        {"entry": 1, "strength": 1.} if bar == 0 else
+        {"exit_long": True, "exit_price": 102.} if bar == 2 else {}
+    ),
+    intrabar=tape_source({2: [105., 103., 101.]}, []),
+)
+assert unreached["exit_bar"].tolist() == [-1]
+
+for bad_price in [0., -1., float("inf"), 107.]:
+    try:
+        callback_run(
+            strategy_callback=lambda bar, positions, value=bad_price:
+                ({"entry": 1, "strength": 1.} if bar == 0 else
+                 {"exit_long": True, "exit_price": value} if bar == 2 else {}),
+            intrabar=tape_source({2: [105., 103., 101.]}, []),
+        )
+    except ValueError as exc:
+        assert "exit_price" in str(exc)
+    else:
+        raise AssertionError(f"accepted invalid exit price: {bad_price}")
+try:
+    callback_run(strategy_callback=lambda bar, positions: (
+        {"entry": 1, "strength": 1.} if bar == 0 else
+        {"exit_long": True, "exit_price": 103.} if bar == 2 else {}
+    ))
+except ValueError as exc:
+    assert "exit_price" in str(exc) and "intrabar" in str(exc)
+else:
+    raise AssertionError("explicit exit price accepted without intrabar data")
 # Runtime levels: the six-value decision carries the stop, and a stop fills at its traded price.
 calls = []
 def levelled(bar, positions):
@@ -568,26 +613,13 @@ except ValueError as exc:
 else:
     raise AssertionError("non-positive runtime entry price accepted")
 
-# The exit pair travels together, and each flag must be a bool.
+# Removed per-tick callbacks are no longer accepted by the Python API.
 try:
     callback_run(exit_screen_callback=lambda *args: True)
-except ValueError as exc:
-    assert "passed together" in str(exc)
+except TypeError:
+    pass
 else:
-    raise AssertionError("lone exit_screen_callback accepted")
-try:
-    callback_run(intrabar=tape_source({}, []), exit_screen_callback=lambda *args: 1,
-                 exit_tick_callback=lambda *args: False)
-except TypeError as exc:
-    assert "exit_screen_callback must return a bool" in str(exc)
-else:
-    raise AssertionError("integer screen flag accepted")
-try:
-    callback_run(exit_screen_callback=lambda *args: False, exit_tick_callback=lambda *args: False)
-except ValueError as exc:
-    assert "intrabar" in str(exc) or "exit_screen_callback" in str(exc)
-else:
-    raise AssertionError("exit callbacks accepted without an intrabar source")
+    raise AssertionError("removed exit callback parameter was accepted")
 
 # Native sources are exposed separately from Python callables and preserve typed data failures.
 assert engine.SESSION_TICK_SOURCE is True
