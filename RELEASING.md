@@ -48,10 +48,15 @@ Only needed when releasing without a board task — for example a documentation-
 1. **Pre-flight Validation**: ensure the working tree is clean (`git status`).
 2. **Bump package versions**: set `[workspace.package] version` in `Cargo.toml` and `version`
    in `pyproject.toml` to today's date in `YYYY.M.D` form (unpadded, matching existing values
-   such as `2026.9.12`), and refresh `Cargo.lock`.
-3. **Execute Validation Suite**: `make check` must pass with zero warnings or errors.
-4. **Create Git Tag**: `git tag v2026.09.14`.
-5. **Publish Tag**: `git push origin development && git push origin v2026.09.14`.
+   such as `2026.9.12`), refresh `Cargo.lock`, and commit.
+3. **Create Git Tag**: `git tag v2026.09.14`.
+4. **Publish**: push the branch and the tag in one command,
+   `git push origin development v2026.09.14`. The pre-push hook (`.githooks/pre-push`) runs
+   the full CI pipeline (`scripts/ci.sh`) once and refuses the push if it fails, so do not
+   run `make check` or `scripts/ci.sh` beforehand; that repeats the same long run. Separate
+   pushes for the branch and the tag would also run the pipeline twice. If the hook fails,
+   delete the local tag (`git tag -d v2026.09.14`), fix the cause on `development`, and
+   repeat from step 3.
 
 ---
 
