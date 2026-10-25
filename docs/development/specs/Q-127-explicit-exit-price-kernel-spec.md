@@ -33,7 +33,8 @@ A closed-bar runtime close fills only at the next bar's open, and the only intra
 
 - Stops, targets and breakeven fills of the bar are applied first, as today. A priced close is considered only if the position is still open afterwards.
 - The priced close scans the bar's trades in stored order, starting at the later of the bar's open and the position's fill time.
-- For a long position it fills at the first trade whose price is at or below `exit_price`; for a short one, at the first trade at or above it. The fill price is that trade's price, the exit time is its time, and the exit reason is the one a closed-bar close records today.
+- The close fills at `exit_price` itself, for a long or a short, timed at the first scanned trade that reaches it from the side the scan started on: at or above it when the first scanned trade is below it, otherwise at or below it. The exit reason is the one a closed-bar close records today.
+- Amended after Q-127 shipped: the first version filled a long only at the first trade at or below `exit_price` (a short at or above), at that trade's price. A close above a long's scan start then filled at the first trade, near the open, instead of the requested price.
 - If no trade of the bar reaches the price, the close does nothing and the position stays open. It does not fall back to the next open.
 - A close without `exit_price` is unchanged.
 
@@ -47,7 +48,7 @@ The decision is taken after the bar's intrabar fills, so a priced close never pr
 
 ## Focused acceptance
 
-1. A long close with `exit_price = P` on a bar whose trades cross P fills at the first trade at or below P, with that trade's price and time; a short mirrors it.
+1. A close with `exit_price = P` on a bar whose trades reach P fills at P, at the time of the first trade reaching P from the side the scan started on, for a long or a short and whichever side of the scan start P lies on.
 2. `exit_price` outside the bar's `[low, high]` raises `CandleError` naming the bar and `exit_price`.
 3. A non-finite or non-positive `exit_price` raises.
 4. A stop that fills earlier in the bar closes the position; the priced close then does nothing.
