@@ -59,10 +59,10 @@ signal path. This native extension requires no contract or Qt API changes.
 The callback `dict` may include `exit_price` alongside `exit_long` or `exit_short` to request an
 explicit close. It requires `intrabar`, `open`, `high` and `low`; the finite positive price must
 lie inside that bar's range. The kernel first applies protective fills, then scans the bar's
-trades in stored order from the bar open or the position's fill time, whichever is later. A long
-closes at the first trade at or below the requested price; a short closes at the first trade at
-or above it. The fill uses that trade's price and timestamp. If no trade reaches the price, the
-position stays open and the decision does not fall back to a next-open close. Without
+trades in stored order from the bar open or the position's fill time, whichever is later. The
+close fills at the requested price, timed at the first trade that reaches it from the side the
+scan started on: at or above it when the first scanned trade is below it, otherwise at or below
+it. If no trade reaches the price, the position stays open and the decision does not fall back to a next-open close. Without
 `exit_price`, signal closes still fill at the next bar's open. Rust callbacks set
 `BarSignals::exit_price`.
 

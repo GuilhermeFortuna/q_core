@@ -278,19 +278,21 @@ fn priced_signal_exit(
             EntryKind::Open => inputs.time_us[bar],
         };
         let first_time = inputs.time_us[bar].max(fill_time);
-        let crossing = prices
+        let mut scanned = prices
             .time_us
             .iter()
             .zip(&prices.price)
-            .find(|(time, price)| {
-                **time >= first_time
-                    && match side {
-                        Side::Long => **price <= requested,
-                        Side::Short => **price >= requested,
-                    }
-            });
-        if let Some((&time_us, &price)) = crossing {
-            let pnl = close_trade(trade, bar, price, ExitReason::Signal, config);
+            .skip_while(|(time, _)| **time < first_time)
+            .peekable();
+        // The tape reaches the price from whichever side the scan starts on, and the close fills
+        // at the requested price itself.
+        let start_below = scanned.peek().map(|(_, price)| **price < requested);
+        let reached = scanned.find(|(_, price)| match start_below {
+            Some(true) => **price >= requested,
+            _ => **price <= requested,
+        });
+        if let Some((&time_us, _)) = reached {
+            let pnl = close_trade(trade, bar, requested, ExitReason::Signal, config);
             trade.exit_time_us = time_us;
             *capital += pnl;
         }

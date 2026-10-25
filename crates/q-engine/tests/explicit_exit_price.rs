@@ -150,7 +150,7 @@ fn close_scan_starts_at_a_resting_position_fill_time() {
 }
 
 #[test]
-fn short_signal_close_scans_up_to_the_requested_price() {
+fn short_signal_close_fills_at_the_requested_price_when_the_tape_trades_through_it() {
     let tape = Tape(BTreeMap::from([(2, vec![99.0, 102.0, 104.0])]));
     let result = run(
         &[-1, 0, 0, 0],
@@ -175,8 +175,98 @@ fn short_signal_close_scans_up_to_the_requested_price() {
         },
     )
     .unwrap();
-    assert_eq!(result.trades.exit_price, vec![104.0]);
+    assert_eq!(result.trades.exit_price, vec![103.0]);
     assert_eq!(result.trades.exit_time_us, vec![22 * SECOND]);
+}
+
+#[test]
+fn long_close_above_the_scan_start_fills_when_the_tape_rises_to_the_price() {
+    let tape = Tape(BTreeMap::from([(2, vec![98.0, 101.0, 104.0, 102.0])]));
+    let result = run(
+        &[1, 0, 0, 0],
+        &[100.0, 100.0, 98.0, 120.0],
+        &[100.0, 100.0, 104.0, 120.0],
+        &[100.0, 100.0, 98.0, 120.0],
+        Some(&tape),
+        |bar, _| {
+            Ok(match bar {
+                0 => BarSignals {
+                    entry: 1,
+                    strength: 1.0,
+                    ..BarSignals::default()
+                },
+                2 => BarSignals {
+                    exit_long: true,
+                    exit_price: Some(103.0),
+                    ..BarSignals::default()
+                },
+                _ => BarSignals::default(),
+            })
+        },
+    )
+    .unwrap();
+    assert_eq!(result.trades.exit_price, vec![103.0]);
+    assert_eq!(result.trades.exit_time_us, vec![22 * SECOND]);
+}
+
+#[test]
+fn short_close_below_the_scan_start_fills_when_the_tape_falls_to_the_price() {
+    let tape = Tape(BTreeMap::from([(2, vec![102.0, 99.0, 96.0])]));
+    let result = run(
+        &[-1, 0, 0, 0],
+        &[100.0, 100.0, 102.0, 80.0],
+        &[100.0, 100.0, 102.0, 80.0],
+        &[100.0, 100.0, 96.0, 80.0],
+        Some(&tape),
+        |bar, _| {
+            Ok(match bar {
+                0 => BarSignals {
+                    entry: -1,
+                    strength: 1.0,
+                    ..BarSignals::default()
+                },
+                2 => BarSignals {
+                    exit_short: true,
+                    exit_price: Some(97.0),
+                    ..BarSignals::default()
+                },
+                _ => BarSignals::default(),
+            })
+        },
+    )
+    .unwrap();
+    assert_eq!(result.trades.exit_price, vec![97.0]);
+    assert_eq!(result.trades.exit_time_us, vec![22 * SECOND]);
+}
+
+#[test]
+fn a_close_at_the_first_scanned_price_fills_on_that_trade() {
+    let tape = Tape(BTreeMap::from([(2, vec![100.0, 104.0, 99.0])]));
+    let result = run(
+        &[1, 0, 0, 0],
+        &[100.0, 100.0, 100.0, 120.0],
+        &[100.0, 100.0, 104.0, 120.0],
+        &[100.0, 100.0, 99.0, 120.0],
+        Some(&tape),
+        |bar, _| {
+            Ok(match bar {
+                0 => BarSignals {
+                    entry: 1,
+                    strength: 1.0,
+                    ..BarSignals::default()
+                },
+                2 => BarSignals {
+                    exit_long: true,
+                    exit_price: Some(100.0),
+                    ..BarSignals::default()
+                },
+                _ => BarSignals::default(),
+            })
+        },
+    )
+    .unwrap();
+    assert_eq!(result.trades.exit_price, vec![100.0]);
+    assert_eq!(result.trades.exit_time_us, vec![20 * SECOND]);
 }
 
 #[test]
