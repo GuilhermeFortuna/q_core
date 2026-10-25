@@ -33,10 +33,11 @@ repository does the whole procedure:
 ```
 
 It bumps `[workspace.package] version` in `Cargo.toml` and `version` in `pyproject.toml` to
-today's date in `YYYY.M.D` form, refreshes `Cargo.lock`, runs `make check`, tags
-`vYYYY.MM.DD` (suffixed `.2`, `.3`, … for a second release the same day), and pushes
-`development` and the tag. If `make check` fails, nothing is tagged or pushed and the task
-stays `In Review`; fix the cause on `development` and run the same command again.
+today's date in `YYYY.M.D` form, refreshes `Cargo.lock`, tags `vYYYY.MM.DD` (suffixed `.2`,
+`.3`, … for a second release the same day), and pushes `development` and the tag in one
+`git push`. The pre-push hook runs the full CI pipeline once; the launcher runs no separate
+`make check`. If the push fails, the local tag is deleted, nothing is pushed and the task stays
+`In Review`; fix the cause on `development` and run the same command again.
 
 Because the tag is what consumers pin, a task that is `Done` here is always one `q_backend`
 or `q_terminal` can consume. See `q/docs/work-cli.md`.
