@@ -43,7 +43,8 @@ pub struct RejectedEntries {
     pub stop_price: Vec<f64>,
     /// `NaN` = no target.
     pub target_price: Vec<f64>,
-    /// `0` wrong-side stop/target, `1` priced entry had no post-exit touch.
+    /// `0` wrong-side stop/target, `1` priced entry had no post-exit touch, `2` priced entry the
+    /// bar's trades never filled.
     pub reason: Vec<i8>,
 }
 
@@ -179,34 +180,34 @@ impl RestingOrder {
     }
 }
 
-/// Index of the trade price that touches a priced entry, or `None` when no price reaches it.
-///
-/// A bar that opens above the price trades down to it, so the touch is the first price at or
-/// below it; a bar that opens below trades up to it, so the touch is the first price at or above
-/// it. A bar that opens exactly at the price touches on its first print. A `NaN` open has no side.
-pub(crate) fn touch_index(prices: &[f64], price: f64, open: f64) -> Option<usize> {
-    match open.partial_cmp(&price)? {
-        Ordering::Greater => prices.iter().position(|&trade| trade <= price),
-        Ordering::Less => prices.iter().position(|&trade| trade >= price),
-        Ordering::Equal => (!prices.is_empty()).then_some(0),
-    }
-}
-
-/// Finds a touch from a stored trade index, using that trade as the scan's reference side.
-pub(crate) fn touch_index_from(prices: &[f64], price: f64, start: usize) -> Option<usize> {
+/// Where a priced order fills on a bar's trade prices, scanning from `start`: the fill's index and
+/// price. The first scanned trade sets the side the order is approached from. One the price moves
+/// toward (a buy below it, a sell above it) is a stop: it fills at the first trade at or beyond its
+/// price, at that trade's price. One the price comes back to is a limit: it fills at its own price
+/// once a trade goes strictly beyond it, since a trade at the price may not reach the order in the
+/// queue. A first scanned trade at the price fills there.
+pub(crate) fn priced_fill(
+    prices: &[f64],
+    price: f64,
+    buy: bool,
+    start: usize,
+) -> Option<(usize, f64)> {
     let reference = *prices.get(start)?;
-    match reference.partial_cmp(&price)? {
-        Ordering::Greater => prices
-            .iter()
-            .enumerate()
-            .skip(start)
-            .find_map(|(i, &trade)| (trade <= price).then_some(i)),
-        Ordering::Less => prices
-            .iter()
-            .enumerate()
-            .skip(start)
-            .find_map(|(i, &trade)| (trade >= price).then_some(i)),
-        Ordering::Equal => Some(start),
+    let scan = || prices.iter().enumerate().skip(start);
+    match (reference.partial_cmp(&price)?, buy) {
+        (Ordering::Equal, _) => Some((start, price)),
+        (Ordering::Less, true) => scan()
+            .find(|(_, &trade)| trade >= price)
+            .map(|(i, &trade)| (i, trade)),
+        (Ordering::Greater, false) => scan()
+            .find(|(_, &trade)| trade <= price)
+            .map(|(i, &trade)| (i, trade)),
+        (Ordering::Greater, true) => scan()
+            .find(|(_, &trade)| trade < price)
+            .map(|(i, _)| (i, price)),
+        (Ordering::Less, false) => scan()
+            .find(|(_, &trade)| trade > price)
+            .map(|(i, _)| (i, price)),
     }
 }
 
@@ -219,32 +220,34 @@ mod tests {
     }
 
     #[test]
-    fn a_bar_opening_at_the_price_touches_on_its_first_print() {
-        assert_eq!(touch_index(&[100.0, 101.5], 100.0, 100.0), Some(0));
-        assert_eq!(touch_index(&[], 100.0, 100.0), None);
-    }
-
-    #[test]
-    fn a_bar_opening_below_touches_at_the_first_print_at_or_above_the_price() {
-        // Equal to the price touches on that print; one step short does not.
-        assert_eq!(touch_index(&[99.0, 101.0, 100.0], 101.0, 99.0), Some(1));
-        assert_eq!(touch_index(&[99.0, 100.5, 101.0], 101.0, 99.0), Some(2));
-        assert_eq!(touch_index(&[99.0, 100.9], 101.0, 99.0), None);
-    }
-
-    #[test]
-    fn a_bar_opening_above_touches_at_the_first_print_at_or_below_the_price() {
-        assert_eq!(touch_index(&[101.0, 99.0, 98.0], 99.0, 101.0), Some(1));
-        assert_eq!(touch_index(&[101.0, 99.5, 99.0], 99.0, 101.0), Some(2));
-        assert_eq!(touch_index(&[101.0, 99.1], 99.0, 101.0), None);
-    }
-
-    #[test]
-    fn touch_from_exit_tick_includes_that_tick_and_uses_it_as_reference() {
-        assert_eq!(touch_index_from(&[100.0, 95.0, 99.0], 100.0, 1), None);
-        assert_eq!(touch_index_from(&[100.0, 95.0, 100.0], 100.0, 1), Some(2));
-        assert_eq!(touch_index_from(&[100.0, 100.0, 99.0], 100.0, 1), Some(1));
-        assert_eq!(touch_index_from(&[100.0, 95.0], 100.0, 1), None);
+    fn a_stop_fills_at_the_trade_that_reaches_it_and_a_limit_needs_a_trade_beyond() {
+        // A buy stop at 100 approached from below fills at the jump's 115.
+        assert_eq!(
+            priced_fill(&[98.0, 115.0], 100.0, true, 0),
+            Some((1, 115.0))
+        );
+        // A sell stop at 100 approached from above fills at the jump's 90.
+        assert_eq!(
+            priced_fill(&[102.0, 90.0], 100.0, false, 0),
+            Some((1, 90.0))
+        );
+        // A buy limit at 100 approached from above: a touch at 100 is not enough.
+        assert_eq!(priced_fill(&[102.0, 100.0, 101.0], 100.0, true, 0), None);
+        assert_eq!(
+            priced_fill(&[102.0, 100.0, 99.0], 100.0, true, 0),
+            Some((2, 100.0))
+        );
+        // A sell limit at 100 approached from below.
+        assert_eq!(
+            priced_fill(&[98.0, 100.0, 101.0], 100.0, false, 0),
+            Some((2, 100.0))
+        );
+        // A first scanned trade at the price fills there; the scan starts at `start`.
+        assert_eq!(
+            priced_fill(&[90.0, 100.0], 100.0, true, 1),
+            Some((1, 100.0))
+        );
+        assert_eq!(priced_fill(&[100.0, 95.0, 99.0], 100.0, true, 1), None);
     }
 
     #[test]

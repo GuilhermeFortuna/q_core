@@ -56,7 +56,7 @@ fn callback_sees_filled_positions_and_preserves_static_results() {
             exit_short: close[bar],
             strength: strength[bar],
             levels: None,
-            entry_price: None,
+            entry_candidates: None,
             ..BarSignals::default()
         })
     })
@@ -290,8 +290,9 @@ fn callback_signals_are_validated_even_on_suppressed_bars() {
             ..BarSignals::default()
         },
     ] {
-        let result =
-            run_candle_with_callback(&inputs, &config, |_, _| Ok::<_, CandleError>(signals));
+        let result = run_candle_with_callback(&inputs, &config, |_, _| {
+            Ok::<_, CandleError>(signals.clone())
+        });
         assert!(matches!(
             result,
             Err(CandleError::InvalidSignal { bar: 0, .. })

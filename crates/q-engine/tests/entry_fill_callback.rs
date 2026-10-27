@@ -92,6 +92,7 @@ fn run<'a>(
         },
         RuntimeCallbacks {
             strategy: None,
+            entry: None,
             entry_filled,
         },
     )
