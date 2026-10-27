@@ -828,6 +828,10 @@ fn py_run_candle<'py>(
         "rejected_target_price",
         PyArray1::from_vec(py, rejected.target_price.clone()),
     )?;
+    out.set_item(
+        "rejected_reason",
+        PyArray1::from_vec(py, rejected.reason.clone()),
+    )?;
 
     out.set_item(
         "entry_kind",

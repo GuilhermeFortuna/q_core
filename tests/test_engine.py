@@ -385,6 +385,7 @@ assert out["rejected_bar"].tolist() == [1]
 assert out["rejected_side"].tolist() == [1]
 assert out["rejected_fill_price"].tolist() == [100.0]
 assert out["rejected_stop_price"].tolist() == [100.0]
+assert out["rejected_reason"].tolist() == [0]
 assert np.isnan(out["rejected_target_price"][0])
 assert calls == [], calls
 

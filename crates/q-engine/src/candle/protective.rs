@@ -43,10 +43,12 @@ pub struct RejectedEntries {
     pub stop_price: Vec<f64>,
     /// `NaN` = no target.
     pub target_price: Vec<f64>,
+    /// `0` wrong-side stop/target, `1` priced entry had no post-exit touch.
+    pub reason: Vec<i8>,
 }
 
 impl RejectedEntries {
-    pub(crate) fn push(&mut self, bar: usize, side: Side, fill: f64, levels: Levels) {
+    pub(crate) fn push(&mut self, bar: usize, side: Side, fill: f64, levels: Levels, reason: i8) {
         self.bar.push(bar as i64);
         self.side.push(match side {
             Side::Long => 1,
@@ -55,6 +57,7 @@ impl RejectedEntries {
         self.fill_price.push(fill);
         self.stop_price.push(levels.stop);
         self.target_price.push(levels.target);
+        self.reason.push(reason);
     }
 }
 
@@ -189,6 +192,24 @@ pub(crate) fn touch_index(prices: &[f64], price: f64, open: f64) -> Option<usize
     }
 }
 
+/// Finds a touch from a stored trade index, using that trade as the scan's reference side.
+pub(crate) fn touch_index_from(prices: &[f64], price: f64, start: usize) -> Option<usize> {
+    let reference = *prices.get(start)?;
+    match reference.partial_cmp(&price)? {
+        Ordering::Greater => prices
+            .iter()
+            .enumerate()
+            .skip(start)
+            .find_map(|(i, &trade)| (trade <= price).then_some(i)),
+        Ordering::Less => prices
+            .iter()
+            .enumerate()
+            .skip(start)
+            .find_map(|(i, &trade)| (trade >= price).then_some(i)),
+        Ordering::Equal => Some(start),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -216,6 +237,14 @@ mod tests {
         assert_eq!(touch_index(&[101.0, 99.0, 98.0], 99.0, 101.0), Some(1));
         assert_eq!(touch_index(&[101.0, 99.5, 99.0], 99.0, 101.0), Some(2));
         assert_eq!(touch_index(&[101.0, 99.1], 99.0, 101.0), None);
+    }
+
+    #[test]
+    fn touch_from_exit_tick_includes_that_tick_and_uses_it_as_reference() {
+        assert_eq!(touch_index_from(&[100.0, 95.0, 99.0], 100.0, 1), None);
+        assert_eq!(touch_index_from(&[100.0, 95.0, 100.0], 100.0, 1), Some(2));
+        assert_eq!(touch_index_from(&[100.0, 100.0, 99.0], 100.0, 1), Some(1));
+        assert_eq!(touch_index_from(&[100.0, 95.0], 100.0, 1), None);
     }
 
     #[test]
