@@ -115,7 +115,9 @@ recorded with the deciding bar as its entry bar. The decision is still traced on
 - The price must lie within `low` and `high` of the deciding bar. Otherwise the run ends with
   `CandleError::EntryPriceOutsideRange`, which names the bar, side, price, low and high.
 - The entry check of the protective section applies against the price. A refused entry is
-  reported in `rejected` with the price as its fill price.
+  reported in `rejected` with the price as its fill price. `rejected_reason` is `0` for a
+  stop or target on the wrong side of the fill, and `1` when an entry has no eligible touch after
+  an earlier same-bar exit.
 - The entry's own stop and target resolve from the bar's trade prices after its touch. The touch
   is the first price at or beyond the entry price on the side the bar opened from: the open itself
   when it equals the price, the first price at or below it when the bar opened above it, or the
@@ -123,6 +125,12 @@ recorded with the deciding bar as its entry bar. The decision is still traced on
   are ignored, and the touching price is the entry. A bar whose range reaches none of the entry's
   levels does not call the source. A bar with a level in range whose prices never reach the entry
   price ends the run with `CandleError::IntrabarSource`.
+- When a trade closes during the bar's protective scan, or a priced signal close fills later in
+  section D, a priced entry searches from that exit's trade index, inclusive. The first scanned
+  trade at or after the exit that reaches the entry price is its touch; prices before the exit do
+  not count. Its stop and target resolve after that touch. If no trade reaches the price, the entry
+  is refused and reported with reason `1`; the run continues. A bar without such an exit retains
+  the touch behavior above.
 - A close queued by the same decision, such as the exit of a reversal, closes only the trades the
   decision saw open. The priced entry stays open. Position caps count the open trades when the
   entry is sized, so a priced entry beside a position that the queued close will exit is refused

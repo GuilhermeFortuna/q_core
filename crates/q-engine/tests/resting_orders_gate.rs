@@ -514,6 +514,52 @@ fn a_trade_opened_by_a_stop_order_can_stop_out_on_the_same_bar() {
     assert_eq!(run.trades.exit_time_us, vec![bar_time(1) + 3 * SECOND]);
 }
 
+#[test]
+fn priced_entry_after_resting_fill_and_same_bar_stop_uses_later_touch() {
+    let series = Series::hourly(&[(100.0, 102.0, 99.0), (100.0, 105.0, 95.0)]);
+    let tape = Tape::new(&series.time_us, &[(1, &[101.0, 99.0, 100.0])]);
+    let result = series
+        .run(
+            &[
+                (
+                    0,
+                    BarSignals {
+                        entry: 1,
+                        strength: 1.0,
+                        resting: Some(RestingOrder {
+                            kind: RestingKind::Stop,
+                            price: 101.0,
+                            expire_bars: None,
+                        }),
+                        levels: Some((99.0, f64::NAN)),
+                        ..BarSignals::default()
+                    },
+                ),
+                (
+                    1,
+                    BarSignals {
+                        entry: 1,
+                        strength: 1.0,
+                        entry_price: Some(100.0),
+                        ..BarSignals::default()
+                    },
+                ),
+            ],
+            Some(&tape),
+            &Series::config(None),
+        )
+        .unwrap();
+
+    assert_eq!(result.trades.entry_kind, vec![2, 1]);
+    assert_eq!(bits(&result.trades.exit_price[..1]), bits(&[99.0]));
+    assert!(result.trades.exit_price[1].is_nan());
+    assert_eq!(
+        result.trades.exit_time_us,
+        vec![series.time_us[1] + SECOND, -1]
+    );
+    assert_eq!(result.rejected.bar, Vec::<i64>::new());
+}
+
 /// A long opened at 100 on bar 1 with a stop at 95 and a long-run series of bars 2 and 3.
 fn amended_long(bar_two: (f64, f64, f64), bar_three: (f64, f64, f64)) -> (CandleRun, Tape) {
     let series = Series::hourly(&[

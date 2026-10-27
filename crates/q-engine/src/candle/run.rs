@@ -6,7 +6,8 @@ use crate::exits::{ExitInputs, ExitRuleId, ExitRuleSet, PositionKey, Side};
 use super::decision::{Decision, DecisionStep, QueuedEntry, TradeView};
 use super::inputs::{BarSignals, CandleInputs};
 use super::protective::{
-    touch_index, IntrabarPrices, IntrabarSource, Levels, RejectedEntries, RestingKind, RestingOrder,
+    touch_index, touch_index_from, IntrabarPrices, IntrabarSource, Levels, RejectedEntries,
+    RestingKind, RestingOrder,
 };
 use super::{side_cost, CandleConfig, CandleError};
 
@@ -241,14 +242,14 @@ fn priced_signal_exit(
     inputs: &CandleInputs<'_>,
     config: &CandleConfig,
     capital: &mut f64,
-) -> Result<bool, CandleError> {
+) -> Result<(bool, Option<usize>), CandleError> {
     let selected = decision.exits.iter().find(|exit| exit.rule.is_none());
     let Some(selected) = selected else {
-        return Ok(false);
+        return Ok((false, None));
     };
     let index = selected.key.0 as usize;
     let Some(selected_trade) = trades.get(index) else {
-        return Ok(false);
+        return Ok((false, None));
     };
     let side = selected_trade.side;
     let requested_by_signal = match side {
@@ -256,7 +257,7 @@ fn priced_signal_exit(
         Side::Short => signals.exit_short,
     };
     if !requested_by_signal {
-        return Ok(false);
+        return Ok((false, None));
     }
 
     let source = inputs.intrabar.ok_or(CandleError::InvalidConfig {
@@ -264,6 +265,7 @@ fn priced_signal_exit(
         reason: "requires intrabar, open, high and low".to_string(),
     })?;
     let prices = intrabar_prices(source, bar)?;
+    let mut last_exit_tick = None;
     for trade in trades
         .iter_mut()
         .filter(|trade| trade.open && trade.side == side)
@@ -282,22 +284,24 @@ fn priced_signal_exit(
             .time_us
             .iter()
             .zip(&prices.price)
-            .skip_while(|(time, _)| **time < first_time)
+            .enumerate()
+            .skip_while(|(_, (time, _))| **time < first_time)
             .peekable();
         // The tape reaches the price from whichever side the scan starts on, and the close fills
         // at the requested price itself.
-        let start_below = scanned.peek().map(|(_, price)| **price < requested);
-        let reached = scanned.find(|(_, price)| match start_below {
+        let start_below = scanned.peek().map(|(_, (_, price))| **price < requested);
+        let reached = scanned.find(|(_, (_, price))| match start_below {
             Some(true) => **price >= requested,
             _ => **price <= requested,
         });
-        if let Some((&time_us, _)) = reached {
+        if let Some((tick, (&time_us, _))) = reached {
             let pnl = close_trade(trade, bar, requested, ExitReason::Signal, config);
             trade.exit_time_us = time_us;
             *capital += pnl;
+            last_exit_tick = Some(last_exit_tick.map_or(tick, |latest: usize| latest.max(tick)));
         }
     }
-    Ok(true)
+    Ok((true, last_exit_tick))
 }
 
 /// `row.get("open", row.get("close", 0.0))`: a present column is read even where it is NaN.
@@ -614,7 +618,7 @@ where
 
                 // Intrabar stops, targets and the resting fill share one scan of this bar's trade
                 // prices, ahead of section D.
-                intrabar_fills(
+                let mut last_exit_tick = intrabar_fills(
                     &mut trades,
                     &mut working,
                     &mut rejected,
@@ -645,7 +649,7 @@ where
                 let mut immediate_exit = false;
                 if let Some(signals) = runtime_signals {
                     if let Some(price) = signals.exit_price.filter(|price| !price.is_nan()) {
-                        immediate_exit = priced_signal_exit(
+                        let (consumed, exit_tick) = priced_signal_exit(
                             &mut trades,
                             &decided,
                             signals,
@@ -655,6 +659,11 @@ where
                             config,
                             &mut capital,
                         )?;
+                        immediate_exit = consumed;
+                        last_exit_tick = match (last_exit_tick, exit_tick) {
+                            (Some(a), Some(b)) => Some(a.max(b)),
+                            (a, b) => a.or(b),
+                        };
                     }
                 }
                 // A cancel removes the working order. Any entry decided here replaces it.
@@ -710,6 +719,7 @@ where
                             bar,
                             entry,
                             price,
+                            last_exit_tick,
                             queued_levels,
                             inputs,
                             config,
@@ -799,14 +809,14 @@ fn intrabar_fills(
     inputs: &CandleInputs<'_>,
     config: &CandleConfig,
     capital: &mut f64,
-) -> Result<(), CandleError> {
+) -> Result<Option<usize>, CandleError> {
     let (Some(source), Some(high), Some(low)) = (inputs.intrabar, inputs.high, inputs.low) else {
-        return Ok(());
+        return Ok(None);
     };
     let (high, low) = (high[bar], low[bar]);
     let any_open = trades.iter().any(|trade| trade.open);
     if !any_open && working.is_none() {
-        return Ok(());
+        return Ok(None);
     }
 
     let mut reached: Vec<bool> = trades
@@ -817,11 +827,12 @@ fn intrabar_fills(
         .as_ref()
         .is_some_and(|order| order.reached_by_range(high, low));
     if !order_reached && !reached.contains(&true) {
-        return Ok(());
+        return Ok(None);
     }
 
     let prices = intrabar_prices(source, bar)?;
 
+    let mut last_exit_tick = None;
     for (tick, (&time_us, &price)) in prices.time_us.iter().zip(&prices.price).enumerate() {
         for (index, trade) in trades.iter_mut().enumerate() {
             if !trade.open || !reached[index] || trade.skips_tick(bar, tick) {
@@ -833,6 +844,7 @@ fn intrabar_fills(
             let pnl = close_trade(trade, bar, fill, reason, config);
             trade.exit_time_us = time_us;
             *capital += pnl;
+            last_exit_tick = Some(tick);
         }
 
         let open_now = trades.iter().any(|trade| trade.open);
@@ -871,7 +883,7 @@ fn intrabar_fills(
             }
         }
     }
-    Ok(())
+    Ok(last_exit_tick)
 }
 
 fn reached_by_range(trade: &Trade, high: f64, low: f64, config: &CandleConfig) -> bool {
@@ -976,24 +988,36 @@ fn open_priced_entry<E: From<CandleError>>(
     bar: usize,
     entry: QueuedEntry,
     price: f64,
+    last_exit_tick: Option<usize>,
     levels: Levels,
     inputs: &CandleInputs<'_>,
     config: &CandleConfig,
     capital: &mut f64,
     rejected: &mut RejectedEntries,
 ) -> Result<Option<usize>, E> {
+    let touch = if let Some(start) = last_exit_tick {
+        let source = inputs.intrabar.expect("an intrabar exit requires a source");
+        let prices = intrabar_prices(source, bar)?;
+        let Some(touch) = touch_index_from(&prices.price, price, start) else {
+            rejected.push(bar, entry.side, price, levels, 1);
+            return Ok(None);
+        };
+        Some(touch)
+    } else {
+        None
+    };
     let opening = Opening {
         kind: EntryKind::Priced,
         levels,
         time_us: -1,
-        tick: 0,
+        tick: touch.unwrap_or(0),
     };
     let Some(index) = open_entry(
         trades, rejected, bar, price, entry, opening, inputs, config, *capital,
     ) else {
         return Ok(None);
     };
-    resolve_entry_levels(&mut trades[index], bar, inputs, config, capital)?;
+    resolve_entry_levels(&mut trades[index], bar, inputs, config, capital, touch)?;
     Ok(Some(index))
 }
 
@@ -1006,6 +1030,7 @@ fn resolve_entry_levels<E: From<CandleError>>(
     inputs: &CandleInputs<'_>,
     config: &CandleConfig,
     capital: &mut f64,
+    known_touch: Option<usize>,
 ) -> Result<(), E> {
     let (Some(source), Some(open), Some(high), Some(low)) =
         (inputs.intrabar, inputs.open, inputs.high, inputs.low)
@@ -1017,15 +1042,15 @@ fn resolve_entry_levels<E: From<CandleError>>(
     }
 
     let prices = intrabar_prices(source, bar)?;
-    let touch = touch_index(&prices.price, trade.entry_price, open[bar]).ok_or_else(|| {
-        CandleError::IntrabarSource {
+    let touch = known_touch
+        .or_else(|| touch_index(&prices.price, trade.entry_price, open[bar]))
+        .ok_or_else(|| CandleError::IntrabarSource {
             bar,
             reason: format!(
                 "no trade price reaches the entry price {}",
                 trade.entry_price
             ),
-        }
-    })?;
+        })?;
 
     let exit = prices
         .time_us
@@ -1100,7 +1125,7 @@ fn open_entry(
         .size(entry.strength, fill, capital, volatility)
     else {
         if opening.levels.rejects(entry.side, fill) {
-            rejected.push(bar, entry.side, fill, opening.levels);
+            rejected.push(bar, entry.side, fill, opening.levels, 0);
         }
         return None;
     };
@@ -1122,7 +1147,7 @@ fn open_entry(
     }
 
     if opening.levels.rejects(entry.side, fill) {
-        rejected.push(bar, entry.side, fill, opening.levels);
+        rejected.push(bar, entry.side, fill, opening.levels, 0);
         return None;
     }
 

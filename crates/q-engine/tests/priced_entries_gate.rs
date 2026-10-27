@@ -336,6 +336,7 @@ fn a_priced_long_whose_stop_is_at_its_price_is_rejected_with_its_bar_side_and_pr
     assert_eq!(run.rejected.side, vec![1]);
     assert_eq!(bits(&run.rejected.fill_price), bits(&[100.0]));
     assert_eq!(bits(&run.rejected.stop_price), bits(&[100.0]));
+    assert_eq!(run.rejected.reason, vec![0]);
     assert!(tape.calls.borrow().is_empty());
 }
 
