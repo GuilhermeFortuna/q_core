@@ -3,7 +3,7 @@
 use crate::exits::breakeven::BreakevenStop;
 use crate::exits::{ExitInputs, ExitRuleId, ExitRuleSet, PositionKey, Side};
 
-use super::decision::{Decision, DecisionStep, QueuedEntry, TradeView};
+use super::decision::{Decision, DecisionStep, QueuedEntry, QueuedExit, TradeView};
 use super::inputs::{BarSignals, CandleInputs};
 use super::protective::{
     touch_index, touch_index_from, IntrabarPrices, IntrabarSource, Levels, RejectedEntries,
@@ -326,15 +326,25 @@ pub struct PositionSnapshot {
 
 pub type StrategyFn<'a, E> = dyn FnMut(usize, &[PositionSnapshot]) -> Result<BarSignals, E> + 'a;
 
+/// Returns whether to close every open trade at the next bar's open.
+pub type EntryFilledFn<'a, E> = dyn FnMut(usize, &[PositionSnapshot]) -> Result<bool, E> + 'a;
+
 /// Host decisions consulted during a run. Absent callbacks leave the static columns in charge.
 pub struct RuntimeCallbacks<'a, E> {
     /// Closed-bar decisions, called once per bar after intrabar fills.
     pub strategy: Option<&'a mut StrategyFn<'a, E>>,
+    /// Called after a priced entry fills on its decision bar and is still open, with that trade
+    /// among the positions. The closed-bar decision ran before the fill and never saw it, so this
+    /// is the only call that can close it at the next bar's open, ahead of that bar's scan.
+    pub entry_filled: Option<&'a mut EntryFilledFn<'a, E>>,
 }
 
 impl<E> Default for RuntimeCallbacks<'_, E> {
     fn default() -> Self {
-        Self { strategy: None }
+        Self {
+            strategy: None,
+            entry_filled: None,
+        }
     }
 }
 
@@ -361,6 +371,7 @@ where
         config,
         RuntimeCallbacks {
             strategy: Some(&mut callback as &mut StrategyFn<'_, E>),
+            entry_filled: None,
         },
     )
 }
@@ -717,6 +728,21 @@ where
                             &mut capital,
                             &mut rejected,
                         )?;
+                        let filled = queued_exempt.filter(|&index| trades[index].open);
+                        if let (Some(index), Some(callback)) =
+                            (filled, callbacks.entry_filled.as_mut())
+                        {
+                            if callback(bar, &snapshot(&trades))? {
+                                // The close now takes the new trade too, at the next bar's open.
+                                queued_exempt = None;
+                                if queued.exits.is_empty() {
+                                    queued.exits.push(QueuedExit {
+                                        key: PositionKey(index as u64),
+                                        rule: None,
+                                    });
+                                }
+                            }
+                        }
                     }
                 }
 
