@@ -590,7 +590,8 @@ first_reached = lists_run(lambda bar, positions: (
     {"entry": 1, "strength": 1.} if bar == 0 else
     {"exit_long": True, "exit_prices": [105., 95.]} if bar == 1 else {}
 ))
-assert first_reached["exit_price"].tolist() == [95.]
+# The long's stop at 95 is reached by the jump to 94, which is its fill.
+assert first_reached["exit_price"].tolist() == [94.]
 assert first_reached["exit_candidate"].tolist() == [1]
 assert first_reached["entry_candidate"].tolist() == [-1]
 entry_seen = []
@@ -811,7 +812,8 @@ with tempfile.TemporaryDirectory() as tmpdir:
     assert priced_calls == [0], priced_calls
     for name in native_priced:
         np.testing.assert_equal(native_priced[name], callable_priced[name], err_msg=name)
-    assert native_priced["entry_price"].tolist() == [100.25]
+    # The buy at 100.25 is a stop above the 100 open; the tape jumps to 100.5, its fill.
+    assert native_priced["entry_price"].tolist() == [100.5]
     assert native_priced["exit_price"].tolist() == [100.6]
 
     mismatch_source = engine.SessionTickSource(

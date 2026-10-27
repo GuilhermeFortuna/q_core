@@ -6,8 +6,7 @@ use crate::exits::{ExitInputs, ExitRuleId, ExitRuleSet, PositionKey, Side};
 use super::decision::{queued_entry, Decision, DecisionStep, QueuedEntry, QueuedExit, TradeView};
 use super::inputs::{BarSignals, CandleInputs, EntryCandidate};
 use super::protective::{
-    touch_index, touch_index_from, IntrabarPrices, IntrabarSource, Levels, RejectedEntries,
-    RestingKind, RestingOrder,
+    priced_fill, IntrabarPrices, IntrabarSource, Levels, RejectedEntries, RestingKind, RestingOrder,
 };
 use super::{side_cost, CandleConfig, CandleError};
 
@@ -234,8 +233,9 @@ fn close_all(
 }
 
 /// Applies a decision's explicitly priced signal close after this bar's protective scan. Each
-/// trade closes at the first requested price its tape reaches, the earlier listed one on a tie. The
-/// close consumes the decision even when the tape reaches none of them.
+/// trade closes at the requested price its tape fills first, the earlier listed one on a tie, as
+/// [`priced_fill`] fills a stop or a limit. The close consumes the decision even when the tape fills
+/// none of them.
 #[allow(
     clippy::too_many_arguments,
     reason = "the close reads the decision, its callback signal, tape, costs and running capital"
@@ -284,24 +284,20 @@ fn priced_signal_exit(
             _ => 0,
         }
         .min(prices.price.len());
-        // The tape reaches each price from whichever side the scan starts on, and the close fills
-        // at the requested price itself. Tick indices preserve source order when timestamps tie.
+        // Closing a long sells and closing a short buys. Tick indices preserve source order when
+        // timestamps tie.
+        let buy = trade.side == Side::Short;
         let reached = requested
             .iter()
             .enumerate()
             .filter_map(|(candidate, &price)| {
-                let start_below = prices.price.get(first_tick).map(|first| *first < price);
-                (first_tick..prices.price.len())
-                    .find(|&tick| match start_below {
-                        Some(true) => prices.price[tick] >= price,
-                        _ => prices.price[tick] <= price,
-                    })
-                    .map(|tick| (tick, candidate))
+                priced_fill(&prices.price, price, buy, first_tick)
+                    .map(|(tick, fill)| (tick, candidate, fill))
             })
-            .min();
-        if let Some((tick, candidate)) = reached {
+            .min_by(|a, b| (a.0, a.1).cmp(&(b.0, b.1)));
+        if let Some((tick, candidate, fill)) = reached {
             let time_us = prices.time_us[tick];
-            let pnl = close_trade(trade, bar, requested[candidate], ExitReason::Signal, config);
+            let pnl = close_trade(trade, bar, fill, ExitReason::Signal, config);
             trade.exit_time_us = time_us;
             trade.exit_candidate = candidate as i64;
             *capital += pnl;
@@ -1156,10 +1152,12 @@ fn priced_entry(
     Ok(candidates)
 }
 
-/// Section D's priced entry: the candidate the tape touches first, the earlier listed one on a tie,
-/// is sized and capped like any entry, then opened at its price on this bar and resolved from the
-/// trade prices after its touch. The other candidates are cancelled. After a same-bar exit only
-/// touches at or after the latest exit count; with none, every candidate is refused with reason `1`.
+/// Section D's priced entry: the candidate the tape fills first, the earlier listed one on a tie, is
+/// sized and capped like any entry, then opened on this bar and resolved from the trade prices after
+/// its fill. A candidate fills as [`priced_fill`] fills a stop or a limit, from the bar's first trade
+/// or, after a same-bar exit, from the latest exit's trade. The others are cancelled. When none
+/// fills, every candidate is refused: with reason `1` after an exit, `2` otherwise. Without an
+/// intrabar source a single candidate fills at its own price.
 #[allow(
     clippy::too_many_arguments,
     reason = "a priced entry reads the bar's state, its costs, its candidates and the rejection log"
@@ -1175,40 +1173,45 @@ fn open_priced_entry<E: From<CandleError>>(
     capital: &mut f64,
     rejected: &mut RejectedEntries,
 ) -> Result<Option<usize>, E> {
-    let (index, touch) = if last_exit_tick.is_some() || candidates.len() > 1 {
-        let source = inputs.intrabar.ok_or(CandleError::InvalidConfig {
-            field: "entry_price",
-            reason: "several priced entries require intrabar, open, high and low".to_string(),
-        })?;
-        let prices = intrabar_prices(source, bar)?;
-        let open = inputs.open.map_or(f64::NAN, |open| open[bar]);
-        let first = candidates
-            .iter()
-            .enumerate()
-            .filter_map(|(index, candidate)| {
-                match last_exit_tick {
-                    Some(start) => touch_index_from(&prices.price, candidate.price, start),
-                    None => touch_index(&prices.price, candidate.price, open),
+    let tape = match inputs.intrabar {
+        Some(source) => Some(intrabar_prices::<E>(source, bar)?),
+        None => None,
+    };
+    let (index, fill, touch) = match &tape {
+        Some(prices) => {
+            let start = last_exit_tick.unwrap_or(0);
+            let first = candidates
+                .iter()
+                .enumerate()
+                .filter_map(|(index, candidate)| {
+                    let buy = candidate.side == Side::Long;
+                    priced_fill(&prices.price, candidate.price, buy, start)
+                        .map(|(tick, fill)| (tick, index, fill))
+                })
+                .min_by(|a, b| (a.0, a.1).cmp(&(b.0, b.1)));
+            let Some((tick, index, fill)) = first else {
+                let reason = if last_exit_tick.is_some() { 1 } else { 2 };
+                for candidate in candidates {
+                    rejected.push(
+                        bar,
+                        candidate.side,
+                        candidate.price,
+                        candidate.levels,
+                        reason,
+                    );
                 }
-                .map(|touch| (touch, index))
-            })
-            .min();
-        let Some((touch, index)) = first else {
-            if last_exit_tick.is_none() {
-                return Err(CandleError::IntrabarSource {
-                    bar,
-                    reason: "no trade price reaches any priced entry".to_string(),
-                }
-                .into());
+                return Ok(None);
+            };
+            (index, fill, Some(tick))
+        }
+        None if candidates.len() == 1 => (0, candidates[0].price, None),
+        None => {
+            return Err(CandleError::InvalidConfig {
+                field: "entry_price",
+                reason: "several priced entries require intrabar, open, high and low".to_string(),
             }
-            for candidate in candidates {
-                rejected.push(bar, candidate.side, candidate.price, candidate.levels, 1);
-            }
-            return Ok(None);
-        };
-        (index, Some(touch))
-    } else {
-        (0, None)
+            .into())
+        }
     };
     let chosen = candidates[index];
     let opening = Opening {
@@ -1222,20 +1225,13 @@ fn open_priced_entry<E: From<CandleError>>(
         ..entry
     };
     let Some(opened) = open_entry(
-        trades,
-        rejected,
-        bar,
-        chosen.price,
-        entry,
-        opening,
-        inputs,
-        config,
-        *capital,
+        trades, rejected, bar, fill, entry, opening, inputs, config, *capital,
     ) else {
         return Ok(None);
     };
     trades[opened].entry_candidate = index as i64;
-    resolve_entry_levels(&mut trades[opened], bar, inputs, config, capital, touch)?;
+    let filled = touch.zip(tape.as_ref());
+    resolve_entry_levels(&mut trades[opened], bar, inputs, config, capital, filled)?;
     Ok(Some(opened))
 }
 
@@ -1248,27 +1244,14 @@ fn resolve_entry_levels<E: From<CandleError>>(
     inputs: &CandleInputs<'_>,
     config: &CandleConfig,
     capital: &mut f64,
-    known_touch: Option<usize>,
+    filled: Option<(usize, &IntrabarPrices)>,
 ) -> Result<(), E> {
-    let (Some(source), Some(open), Some(high), Some(low)) =
-        (inputs.intrabar, inputs.open, inputs.high, inputs.low)
-    else {
+    let (Some((touch, prices)), Some(high), Some(low)) = (filled, inputs.high, inputs.low) else {
         return Ok(());
     };
     if !reached_by_range(trade, high[bar], low[bar], config) {
         return Ok(());
     }
-
-    let prices = intrabar_prices(source, bar)?;
-    let touch = known_touch
-        .or_else(|| touch_index(&prices.price, trade.entry_price, open[bar]))
-        .ok_or_else(|| CandleError::IntrabarSource {
-            bar,
-            reason: format!(
-                "no trade price reaches the entry price {}",
-                trade.entry_price
-            ),
-        })?;
 
     let exit = prices
         .time_us

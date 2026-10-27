@@ -62,11 +62,24 @@ lie inside that bar's range. The kernel first applies protective fills, then sca
 trades in stored order by tick index, independent of timestamps. A resting or priced position opened
 on this bar starts its close scan after its `first_tick`, so neither earlier equal-timestamp trades
 nor its fill print can close it. Other open positions scan from the bar's first trade. The close
-fills at the requested price, timed at the first eligible trade that reaches it from the side the
-scan started on: at or above it when the first scanned trade is below it, otherwise at or below
-it. If no trade reaches the price, the position stays open and the decision does not fall back to
-a next-open close. Without `exit_price`, signal closes still fill at the next bar's open. Rust
+fills by the [priced fill rule](#priced-fill-rule): closing a long sells and closing a short buys.
+If no trade fills it, the position stays open and the decision does not fall back to a next-open
+close. Without `exit_price`, signal closes still fill at the next bar's open. Rust
 callbacks set `BarSignals::exit_prices`.
+
+### Priced fill rule
+
+A priced close or entry is a stop or a limit, told apart by the side of the first scanned trade:
+
+- **Stop:** the price moves toward the order, as for a buy above that trade or a sell below it,
+  including a long's stop below the market. It fills at the first trade at or beyond its price, at
+  that trade's price, so a jump through the level fills at the jump.
+- **Limit:** the price comes back to the order, as for a buy below that trade or a sell above it,
+  including a long's target above the market. It fills at its own price once a trade goes strictly
+  beyond it, since a trade exactly at the price may not reach the order in the queue. Protective
+  targets follow the same rule.
+- A first scanned trade at the price fills there. A strategy whose bar opens beyond its level
+  passes the open as the price.
 
 ### Order lists
 
@@ -140,23 +153,16 @@ recorded with the deciding bar as its entry bar. The decision is still traced on
   `CandleError::EntryPriceOutsideRange`, which names the bar, side, price, low and high.
 - The entry check of the protective section applies against the price. A refused entry is
   reported in `rejected` with the price as its fill price. `rejected_reason` is `0` for a
-  stop or target on the wrong side of the fill, and `1` when an entry has no eligible touch after
-  an earlier same-bar exit.
-- The entry's own stop and target resolve from the bar's trade prices after its touch. The touch
-  is the first price at or beyond the entry price on the side the bar opened from: the open itself
-  when it equals the price, the first price at or below it when the bar opened above it, or the
-  first price at or above it when the bar opened below it. Prices up to and including the touch
-  are ignored, and the touching price is the entry. A bar whose range reaches none of the entry's
-  levels does not call the source. A bar with a level in range whose prices never reach the entry
-  price ends the run with `CandleError::IntrabarSource`.
+  stop or target on the wrong side of the fill, `1` when an entry has no fill after an earlier
+  same-bar exit, and `2` when the bar's trades never fill it.
+- With an `intrabar` source the entry fills on the bar's trade prices by the
+  [priced fill rule](#priced-fill-rule), scanning from the bar's first trade; its trade is the
+  touch, and the entry's price is the fill's. Prices up to and including the touch are ignored when
+  its own stop and target resolve after it. Without a source the entry fills at its price.
 - When one or more trades close during the bar's protective scan, or a priced signal close fills
-  later in section D, a priced entry searches from the latest such exit's trade index, inclusive.
-  The kernel asks for the bar's tape whenever this rule applies, even if the new entry has no levels
-  or none of its levels are in range. The first scanned
-  trade at or after the exit that reaches the entry price is its touch; prices before the exit do
-  not count. Its stop and target resolve after that touch. If no trade reaches the price, the entry
-  is refused and reported with reason `1`; the run continues. A bar without such an exit retains
-  the touch behavior above.
+  later in section D, a priced entry scans from the latest such exit's trade index, inclusive, so
+  prices before the exit do not count. If nothing fills it after the exit, the entry is refused and
+  reported with reason `1`; the run continues.
 - A close queued by the same decision, such as the exit of a reversal, closes only the trades the
   decision saw open. The priced entry stays open. Position caps count the open trades when the
   entry is sized, so a priced entry beside a position that the queued close will exit is refused

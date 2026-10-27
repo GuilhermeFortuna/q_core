@@ -173,8 +173,10 @@ impl Scenario {
 
 #[test]
 fn priced_entry_breakeven_ignores_prices_before_and_at_its_touch() {
-    let scenario = Scenario::hourly(&[(95.0, 105.0, 95.0)]).enter(0, 1, 100.0);
-    let tape = Tape::new(&[(0, &[95.0, 105.0, 100.0, 98.0])]);
+    // The bar opens above the long's price, so it is a limit that fills once 99.5 trades below it.
+    // The 105 before that fill would arm breakeven if it counted.
+    let scenario = Scenario::hourly(&[(101.0, 105.0, 98.0)]).enter(0, 1, 100.0);
+    let tape = Tape::new(&[(0, &[101.0, 105.0, 99.5, 98.0])]);
     let mut config = config(fixed_quantity());
     config.exit_params = ExitParams::from_pairs([
         ("breakeven_trigger_pct", q_engine::ParamValue::Float(0.02)),
@@ -216,7 +218,7 @@ fn a_priced_long_opens_on_its_deciding_bar_at_the_price() {
     // Bar 1 decides a long at 101, the high of bar 0. Bar 1 opens at 100 and trades through 101.
     let scenario =
         Scenario::hourly(&[(100.0, 101.0, 99.0), (100.0, 102.0, 99.5)]).enter(1, 1, 101.0);
-    let tape = Tape::default();
+    let tape = Tape::new(&[(1, &[100.0, 101.0, 102.0, 99.5])]);
 
     let run = scenario.run(&tape).expect("hand-built series is valid");
 
@@ -224,19 +226,42 @@ fn a_priced_long_opens_on_its_deciding_bar_at_the_price() {
     assert_eq!(run.trades.side, vec![1]);
     assert_eq!(bits(&run.trades.entry_price), bits(&[101.0]));
     assert_eq!(run.trades.exit_bar, vec![-1]);
-    assert!(tape.calls.borrow().is_empty());
+    assert_eq!(*tape.calls.borrow(), vec![1]);
 }
 
 #[test]
-fn a_priced_long_below_the_open_fills_when_the_low_reaches_it() {
+fn a_priced_long_above_the_open_is_a_stop_that_fills_at_the_trade_that_jumps_past_it() {
+    let scenario = Scenario::hourly(&[(100.0, 103.0, 99.5)]).enter(0, 1, 101.0);
+    let tape = Tape::new(&[(0, &[100.0, 103.0, 99.5])]);
+
+    let run = scenario.run(&tape).expect("hand-built series is valid");
+
+    assert_eq!(bits(&run.trades.entry_price), bits(&[103.0]));
+}
+
+#[test]
+fn a_priced_long_below_the_open_is_a_limit_that_fills_at_its_price_once_traded_below() {
     let scenario = Scenario::hourly(&[(100.0, 101.0, 97.5)]).enter(0, 1, 98.0);
 
     let run = scenario
-        .run(&Tape::default())
+        .run(&Tape::new(&[(0, &[100.0, 97.5, 101.0])]))
         .expect("hand-built series is valid");
 
     assert_eq!(run.trades.entry_bar, vec![0]);
     assert_eq!(bits(&run.trades.entry_price), bits(&[98.0]));
+}
+
+#[test]
+fn a_limit_only_touched_at_its_price_does_not_fill_and_is_reported() {
+    let scenario = Scenario::hourly(&[(100.0, 101.0, 98.0)]).enter(0, 1, 98.0);
+
+    let run = scenario
+        .run(&Tape::new(&[(0, &[100.0, 98.0, 101.0])]))
+        .expect("hand-built series is valid");
+
+    assert!(run.trades.entry_bar.is_empty());
+    assert_eq!(run.rejected.bar, vec![0]);
+    assert_eq!(run.rejected.reason, vec![2]);
 }
 
 #[test]
@@ -327,7 +352,7 @@ fn a_priced_long_whose_stop_is_at_its_price_is_rejected_with_its_bar_side_and_pr
     let scenario = Scenario::hourly(&[(100.0, 101.0, 99.0)])
         .enter(0, 1, 100.0)
         .levels(0, 100.0, f64::NAN);
-    let tape = Tape::default();
+    let tape = Tape::new(&[(0, &[100.0, 101.0, 99.0])]);
 
     let run = scenario.run(&tape).expect("hand-built series is valid");
 
@@ -337,7 +362,6 @@ fn a_priced_long_whose_stop_is_at_its_price_is_rejected_with_its_bar_side_and_pr
     assert_eq!(bits(&run.rejected.fill_price), bits(&[100.0]));
     assert_eq!(bits(&run.rejected.stop_price), bits(&[100.0]));
     assert_eq!(run.rejected.reason, vec![0]);
-    assert!(tape.calls.borrow().is_empty());
 }
 
 #[test]
@@ -346,7 +370,7 @@ fn a_priced_entry_is_not_queued_for_the_next_bar() {
         Scenario::hourly(&[(100.0, 101.0, 99.0), (100.0, 101.0, 99.0)]).enter(0, 1, 100.0);
 
     let run = scenario
-        .run(&Tape::default())
+        .run(&Tape::new(&[(0, &[100.0, 101.0, 99.0])]))
         .expect("hand-built series is valid");
 
     assert_eq!(run.trades.entry_bar, vec![0]);
@@ -378,7 +402,7 @@ fn a_priced_entry_survives_the_exit_queued_with_it() {
     };
 
     let run = scenario
-        .run_sized(&Tape::default(), sizing)
+        .run_sized(&Tape::new(&[(1, &[100.0, 99.0, 101.0, 98.0])]), sizing)
         .expect("hand-built series is valid");
 
     assert_eq!(run.trades.side, vec![1, -1]);
@@ -388,15 +412,15 @@ fn a_priced_entry_survives_the_exit_queued_with_it() {
 }
 
 #[test]
-fn a_bar_whose_range_cannot_reach_a_level_after_the_touch_does_not_call_the_source() {
-    // Neither level is inside the bar's range of 98 to 105, so the source is never asked.
+fn a_bar_whose_range_cannot_reach_a_level_after_the_fill_reads_the_source_only_for_the_fill() {
+    // Neither level is inside the bar's range of 98 to 105, so the levels never ask the source.
     let scenario = Scenario::hourly(&[(100.0, 105.0, 98.0)])
         .enter(0, 1, 100.0)
         .levels(0, 95.0, 110.0);
-    let tape = Tape::default();
+    let tape = Tape::new(&[(0, &[100.0, 105.0, 98.0])]);
 
     let run = scenario.run(&tape).expect("hand-built series is valid");
 
     assert_eq!(run.trades.entry_bar, vec![0]);
-    assert!(tape.calls.borrow().is_empty());
+    assert_eq!(*tape.calls.borrow(), vec![0]);
 }

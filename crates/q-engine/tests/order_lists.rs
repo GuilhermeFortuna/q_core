@@ -139,7 +139,8 @@ fn the_exit_price_the_tape_reaches_first_closes_the_trade() {
     for (prices, winner) in [(vec![95.0, 105.0], 0), (vec![105.0, 95.0], 1)] {
         let result = close_long(buy(), prices, false);
         assert_eq!(result.trades.exit_bar, vec![1]);
-        assert_eq!(result.trades.exit_price, vec![95.0]);
+        // The stop at 95 is reached by the jump to 94, its fill.
+        assert_eq!(result.trades.exit_price, vec![94.0]);
         assert_eq!(result.trades.exit_time_us, vec![11]);
         assert_eq!(result.trades.exit_candidate, vec![winner]);
         assert_eq!(result.trades.exit_reason, vec![ExitReason::Signal.code()]);
@@ -149,8 +150,33 @@ fn the_exit_price_the_tape_reaches_first_closes_the_trade() {
 #[test]
 fn exit_prices_reached_on_the_same_tick_resolve_in_list_order() {
     let result = close_long(buy(), vec![96.0, 95.0], false);
-    assert_eq!(result.trades.exit_price, vec![96.0]);
+    assert_eq!(result.trades.exit_price, vec![94.0]);
     assert_eq!(result.trades.exit_candidate, vec![0]);
+}
+
+#[test]
+fn a_target_fills_at_its_price_once_traded_beyond_and_not_on_a_touch() {
+    // The long's target at 106 is only touched, so the stop at 95 is the one that fills.
+    let touched = close_long(buy(), vec![106.0, 95.0], false);
+    assert_eq!(touched.trades.exit_candidate, vec![1]);
+    // A target at 104 trades beyond at 106, after the stop's 94.
+    let beyond = run(
+        &[&[100.0], &[100.0, 105.0, 94.0], &[102.0]],
+        Box::new(|bar, _| {
+            Ok(match bar {
+                0 => buy(),
+                1 => BarSignals {
+                    exit_long: true,
+                    exit_prices: vec![95.0, 104.0],
+                    ..BarSignals::default()
+                },
+                _ => BarSignals::default(),
+            })
+        }),
+        None,
+    );
+    assert_eq!(beyond.trades.exit_price, vec![104.0]);
+    assert_eq!(beyond.trades.exit_candidate, vec![1]);
 }
 
 #[test]
@@ -238,8 +264,9 @@ fn the_entry_callback_sees_the_positions_left_after_priced_closes() {
         vec![candidate(Side::Long, 105.0), candidate(Side::Short, 103.0)],
     );
     assert_eq!(seen, vec![(0, 0), (1, 0)]);
-    assert_eq!(result.trades.exit_price[0].to_bits(), 95.0_f64.to_bits());
-    // After the exit at 94 the tape rises: 103 is touched at 104, before 105 at 106.
+    assert_eq!(result.trades.exit_price[0].to_bits(), 94.0_f64.to_bits());
+    // After the exit at 94 the tape rises: the short at 103 is a limit traded beyond at 104, before
+    // the long's stop at 105 fills at 106.
     assert_eq!(result.trades.side, vec![1, -1]);
     assert_eq!(result.trades.entry_price[1].to_bits(), 103.0_f64.to_bits());
     assert_eq!(result.trades.entry_candidate, vec![-1, 1]);

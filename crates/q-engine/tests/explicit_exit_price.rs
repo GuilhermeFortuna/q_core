@@ -314,7 +314,7 @@ fn a_resting_fill_print_itself_cannot_fill_a_priced_close() {
 }
 
 #[test]
-fn short_signal_close_fills_at_the_requested_price_when_the_tape_trades_through_it() {
+fn a_short_close_above_the_tape_is_a_stop_and_fills_at_the_trade_that_reaches_it() {
     let tape = Tape(BTreeMap::from([(2, vec![99.0, 102.0, 104.0])]));
     let result = run(
         &[-1, 0, 0, 0],
@@ -339,7 +339,8 @@ fn short_signal_close_fills_at_the_requested_price_when_the_tape_trades_through_
         },
     )
     .unwrap();
-    assert_eq!(result.trades.exit_price, vec![103.0]);
+    // The tape jumps from 102 to 104, so the stop at 103 fills at 104.
+    assert_eq!(result.trades.exit_price, vec![104.0]);
     assert_eq!(result.trades.exit_time_us, vec![22 * SECOND]);
 }
 
