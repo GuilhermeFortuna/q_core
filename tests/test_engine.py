@@ -541,6 +541,36 @@ except ValueError as exc:
     assert "exit_price" in str(exc) and "intrabar" in str(exc)
 else:
     raise AssertionError("explicit exit price accepted without intrabar data")
+# A close requested once a priced entry fills exits at the next open, ahead of that bar's target.
+def fill_run(entry_fill_callback):
+    return engine.run_candle(
+        time_us=np.array([(10 + b) * HOUR for b in range(3)], dtype=np.int64),
+        open=np.array([100., 100., 100.]), high=np.array([100., 101., 107.]),
+        low=np.array([100., 99., 100.]), close=None,
+        entry=np.zeros(3, dtype=np.int8), exit_long=np.zeros(3, dtype=bool),
+        exit_short=np.zeros(3, dtype=bool), strength=np.zeros(3), columns={},
+        initial_capital=1000., point_value=1., costs=None,
+        sizing={"type": "fixed_quantity", "quantity": 1., "scale_by_signal_strength": False},
+        sizing_point_value=1., exit_params={}, force_close_at_end=False,
+        strategy_callback=lambda bar, positions: (
+            (1, False, False, 1., NAN, 106., 100.) if bar == 1 else (0, False, False, 0.)
+        ),
+        entry_fill_callback=entry_fill_callback,
+        intrabar=tape_source({1: [100., 101., 99.], 2: [100., 103., 107.]}, []),
+    )
+fill_calls = []
+closed_after_fill = fill_run(lambda bar, positions: fill_calls.append((bar, positions)) is None)
+assert [(bar, len(positions)) for bar, positions in fill_calls] == [(1, 1)]
+assert closed_after_fill["exit_bar"].tolist() == [2]
+assert closed_after_fill["exit_price"].tolist() == [100.]
+assert closed_after_fill["exit_reason_text"] == ["SIGNAL"]
+assert fill_run(lambda bar, positions: False)["exit_reason_text"] == ["TAKE_PROFIT"]
+try:
+    fill_run(lambda bar, positions: 1)
+except TypeError as exc:
+    assert "entry_fill_callback" in str(exc)
+else:
+    raise AssertionError("accepted a non-bool entry_fill_callback result")
 # Runtime levels: the six-value decision carries the stop, and a stop fills at its traded price.
 calls = []
 def levelled(bar, positions):

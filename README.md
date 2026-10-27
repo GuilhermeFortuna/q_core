@@ -139,6 +139,11 @@ recorded with the deciding bar as its entry bar. The decision is still traced on
   decision saw open. The priced entry stays open. Position caps count the open trades when the
   entry is sized, so a priced entry beside a position that the queued close will exit is refused
   when the cap has no room for both.
+- The closed-bar callback runs before the priced entry fills, so it never sees that trade.
+  `RuntimeCallbacks::entry_filled` (Python: `entry_fill_callback`) is then called once with the
+  positions open after the fill, the new trade among them, unless that trade already closed on
+  its own bar. Returning `true` queues a close of every open trade for the next bar's open, which
+  fills ahead of that bar's protective scan. Python callers must return a `bool`.
 - Custom intrabar exits do not run on the entry's own bar. They apply from the next bar.
 - Without `entry_price` every output is unchanged. Day-trade windows gate priced entries as they
   gate every entry, and priced entries never rest beyond the deciding bar. Resting orders are

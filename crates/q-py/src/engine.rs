@@ -15,11 +15,11 @@ use q_engine::{
     resolve_bar_ms as resolve_bar_ms_rs, run_candle_with_callbacks,
     sample_at_bar_ends as sample_at_bar_ends_rs, simulate_ticks, tick_bars as tick_bars_rs,
     tick_day_bounds as tick_day_bounds_rs, BarSignals, CandleConfig, CandleError, CandleInputs,
-    Costs, DayTradeWindow, DecisionStep, ExitInputs, ExitParams, ExitRuleId, ExitRuleSet,
-    IntrabarPrices, IntrabarSource, ParamValue, PositionKey, PositionSnapshot, ProtectiveColumns,
-    QueuedEntry, RestingKind, RestingOrder, RuleState, RuntimeCallbacks, SessionLoader,
-    SessionTickBars, SessionTickError, SessionTicks, Side, SignalColumns, Sizing, StrategyFn,
-    TickError, TickInputs, TickSizing, TradeView,
+    Costs, DayTradeWindow, DecisionStep, EntryFilledFn, ExitInputs, ExitParams, ExitRuleId,
+    ExitRuleSet, IntrabarPrices, IntrabarSource, ParamValue, PositionKey, PositionSnapshot,
+    ProtectiveColumns, QueuedEntry, RestingKind, RestingOrder, RuleState, RuntimeCallbacks,
+    SessionLoader, SessionTickBars, SessionTickError, SessionTicks, Side, SignalColumns, Sizing,
+    StrategyFn, TickError, TickInputs, TickSizing, TradeView,
 };
 
 create_exception!(q_core_engine, IntrabarDataError, PyValueError);
@@ -456,6 +456,7 @@ fn extract_f64<'py>(
     intrabar=None,
     strategy_callback=None,
     snapshot_levels=false,
+    entry_fill_callback=None,
 ))]
 fn py_run_candle<'py>(
     py: Python<'py>,
@@ -487,6 +488,7 @@ fn py_run_candle<'py>(
     intrabar: Option<&Bound<'py, PyAny>>,
     strategy_callback: Option<&Bound<'py, PyAny>>,
     snapshot_levels: bool,
+    entry_fill_callback: Option<&Bound<'py, PyAny>>,
 ) -> PyResult<Bound<'py, PyDict>> {
     require_int8("entry", entry)?;
     let entry_arr: PyReadonlyArray1<'py, i8> = entry.extract()?;
@@ -739,6 +741,19 @@ fn py_run_candle<'py>(
             strategy_decision(&returned, bar)
         }
     });
+    let mut entry_filled = entry_fill_callback.map(|callback| {
+        move |bar: usize, positions: &[PositionSnapshot]| -> Result<bool, StrategyRunError> {
+            let snapshot = position_tuples(py, positions, snapshot_levels)?;
+            let returned = callback.call1((bar, snapshot))?;
+            if !returned.is_instance_of::<PyBool>() {
+                return Err(PyTypeError::new_err(format!(
+                    "entry_fill_callback[{bar}]: must return a bool"
+                ))
+                .into());
+            }
+            Ok(returned.extract::<bool>()?)
+        }
+    });
     let result = run_candle_with_callbacks(
         &inputs,
         &config,
@@ -746,6 +761,9 @@ fn py_run_candle<'py>(
             strategy: strategy
                 .as_mut()
                 .map(|closure| closure as &mut StrategyFn<'_, StrategyRunError>),
+            entry_filled: entry_filled
+                .as_mut()
+                .map(|closure| closure as &mut EntryFilledFn<'_, StrategyRunError>),
         },
     );
     let run = result.map_err(|err| {
