@@ -7,14 +7,14 @@ use q_engine::{
     SignalColumns, Sizing,
 };
 
-struct Tape(Vec<f64>, RefCell<Vec<usize>>);
+struct Tape(Vec<f64>, RefCell<Vec<usize>>, bool);
 
 impl IntrabarSource for Tape {
     fn prices(&self, bar: usize) -> Result<IntrabarPrices, String> {
         self.1.borrow_mut().push(bar);
         Ok(IntrabarPrices {
             time_us: (0..self.0.len())
-                .map(|i| bar as i64 * 10 + i as i64)
+                .map(|i| bar as i64 * 10 + if self.2 { 1 } else { i as i64 })
                 .collect(),
             price: self.0.clone(),
         })
@@ -22,28 +22,49 @@ impl IntrabarSource for Tape {
 }
 
 fn run(ticks: &[f64], new_price: f64, new_stop: f64) -> q_engine::CandleRun {
-    run_case(ticks, new_price, new_stop, 1, 95.0, f64::NAN)
+    run_case(ticks, new_price, new_stop, f64::NAN, 1, 95.0, f64::NAN)
 }
 
 fn run_case(
     ticks: &[f64],
     new_price: f64,
     new_stop: f64,
+    new_target: f64,
     side: i8,
     old_stop: f64,
     old_target: f64,
 ) -> q_engine::CandleRun {
-    let tape = Tape(ticks.to_vec(), RefCell::new(Vec::new()));
+    run_case_with_time_mode(
+        ticks,
+        new_price,
+        (new_stop, new_target),
+        side,
+        (old_stop, old_target),
+        false,
+    )
+}
+
+fn run_case_with_time_mode(
+    ticks: &[f64],
+    new_price: f64,
+    new_levels: (f64, f64),
+    side: i8,
+    old_levels: (f64, f64),
+    equal_timestamps: bool,
+) -> q_engine::CandleRun {
+    let (new_stop, new_target) = new_levels;
+    let (old_stop, old_target) = old_levels;
+    let tape = Tape(ticks.to_vec(), RefCell::new(Vec::new()), equal_timestamps);
     let time = [0, 10];
     let open = [100.0, 100.0];
-    let high = [101.0, 110.0];
-    let low = [99.0, 90.0];
+    let high = [101.0, 112.0];
+    let low = [99.0, 88.0];
     let entry = [side, side];
     let exit_long = [false; 2];
     let strength = [1.0; 2];
     let volatility = [1.0; 2];
     let stop = [old_stop, new_stop];
-    let target = [old_target, f64::NAN];
+    let target = [old_target, new_target];
     let entry_price = [f64::NAN, new_price];
     let none = |_: &str| None;
     let inputs = CandleInputs {
@@ -106,29 +127,89 @@ fn entry_without_levels_is_still_rejected_when_it_has_no_post_exit_touch() {
 
 #[test]
 fn touch_at_or_after_exit_opens_and_resolves_levels_after_touch() {
-    let result = run(&[100.0, 95.0, 100.0, 89.0], 100.0, 90.0);
+    let result = run(&[100.0, 95.0, 100.0, 97.0], 100.0, 98.0);
     assert_eq!(result.trades.entry_bar, vec![1, 1]);
-    assert_eq!(result.trades.exit_price, vec![95.0, 89.0]);
+    assert_eq!(result.trades.exit_price, vec![95.0, 97.0]);
     assert_eq!(result.trades.exit_time_us, vec![11, 13]);
 }
 
 #[test]
 fn target_exit_and_short_stop_exit_constrain_the_next_priced_entry() {
-    let target_exit = run_case(&[100.0, 106.0, 99.0, 89.0], 100.0, 90.0, 1, f64::NAN, 105.0);
+    let target_exit = run_case(
+        &[100.0, 106.0, 99.0, 106.0],
+        100.0,
+        90.0,
+        105.0,
+        1,
+        f64::NAN,
+        105.0,
+    );
     assert_eq!(target_exit.trades.entry_bar, vec![1, 1]);
-    assert_eq!(target_exit.trades.exit_price, vec![105.0, 89.0]);
+    assert_eq!(target_exit.trades.exit_price, vec![105.0, 105.0]);
     assert_eq!(target_exit.trades.exit_time_us, vec![11, 13]);
 
     let short_stop = run_case(
-        &[100.0, 105.0, 99.0, 111.0],
+        &[100.0, 94.0, 105.0, 99.0],
         100.0,
         110.0,
+        95.0,
         -1,
         105.0,
         f64::NAN,
     );
     assert_eq!(short_stop.trades.side, vec![-1, -1]);
     assert_eq!(short_stop.trades.entry_bar, vec![1, 1]);
-    assert_eq!(short_stop.trades.exit_price, vec![105.0, 111.0]);
-    assert_eq!(short_stop.trades.exit_time_us, vec![11, 13]);
+    assert_eq!(
+        short_stop.trades.exit_price[0].to_bits(),
+        105.0_f64.to_bits()
+    );
+    assert!(short_stop.trades.exit_price[1].is_nan());
+    assert_eq!(short_stop.trades.exit_time_us, vec![12, -1]);
+}
+
+#[test]
+fn target_and_short_stop_with_no_later_touch_are_rejected() {
+    let target_exit = run_case(
+        &[100.0, 106.0, 101.0],
+        100.0,
+        f64::NAN,
+        f64::NAN,
+        1,
+        f64::NAN,
+        105.0,
+    );
+    assert_eq!(target_exit.rejected.reason, vec![1]);
+
+    let short_stop = run_case(
+        &[100.0, 105.0, 101.0],
+        100.0,
+        f64::NAN,
+        f64::NAN,
+        -1,
+        105.0,
+        f64::NAN,
+    );
+    assert_eq!(short_stop.rejected.reason, vec![1]);
+}
+
+#[test]
+fn the_exit_tick_itself_can_be_the_priced_entry_touch() {
+    let result = run(&[100.0, 95.0, 101.0], 95.0, 90.0);
+    assert_eq!(result.trades.entry_bar, vec![1, 1]);
+    assert_eq!(result.trades.exit_time_us, vec![11, -1]);
+}
+
+#[test]
+fn equal_timestamp_ticks_keep_their_stored_exit_order() {
+    let result = run_case_with_time_mode(
+        &[100.0, 95.0, 100.0, 97.0],
+        100.0,
+        (98.0, f64::NAN),
+        1,
+        (95.0, f64::NAN),
+        true,
+    );
+    assert_eq!(result.trades.exit_price[0].to_bits(), 95.0_f64.to_bits());
+    assert_eq!(result.trades.exit_price[1].to_bits(), 97.0_f64.to_bits());
+    assert_eq!(result.trades.exit_time_us, vec![11, 11]);
 }

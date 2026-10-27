@@ -125,8 +125,10 @@ recorded with the deciding bar as its entry bar. The decision is still traced on
   are ignored, and the touching price is the entry. A bar whose range reaches none of the entry's
   levels does not call the source. A bar with a level in range whose prices never reach the entry
   price ends the run with `CandleError::IntrabarSource`.
-- When a trade closes during the bar's protective scan, or a priced signal close fills later in
-  section D, a priced entry searches from that exit's trade index, inclusive. The first scanned
+- When one or more trades close during the bar's protective scan, or a priced signal close fills
+  later in section D, a priced entry searches from the latest such exit's trade index, inclusive.
+  The kernel asks for the bar's tape whenever this rule applies, even if the new entry has no levels
+  or none of its levels are in range. The first scanned
   trade at or after the exit that reaches the entry price is its touch; prices before the exit do
   not count. Its stop and target resolve after that touch. If no trade reaches the price, the entry
   is refused and reported with reason `1`; the run continues. A bar without such an exit retains

@@ -100,7 +100,7 @@ pub struct DecisionTrace {
 pub struct CandleRun {
     pub trades: TradeLedger,
     pub trace: DecisionTrace,
-    /// Entries refused because a level was already on the wrong side of the fill.
+    /// Entries refused by a wrong-side protective level or by a missing post-exit touch.
     pub rejected: RejectedEntries,
 }
 
