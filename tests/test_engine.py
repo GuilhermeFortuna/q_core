@@ -571,6 +571,62 @@ except TypeError as exc:
     assert "entry_fill_callback" in str(exc)
 else:
     raise AssertionError("accepted a non-bool entry_fill_callback result")
+# Order lists: the first exit price the tape reaches closes the trade, and a split entry callback
+# sees the positions left after it and fills the first entry candidate the tape touches.
+def lists_run(strategy_callback, entry_callback=None):
+    return engine.run_candle(
+        time_us=np.array([(10 + b) * HOUR for b in range(3)], dtype=np.int64),
+        open=np.array([100., 100., 102.]), high=np.array([100., 106., 102.]),
+        low=np.array([100., 94., 102.]), close=None,
+        entry=np.zeros(3, dtype=np.int8), exit_long=np.zeros(3, dtype=bool),
+        exit_short=np.zeros(3, dtype=bool), strength=np.zeros(3), columns={},
+        initial_capital=1000., point_value=1., costs=None,
+        sizing={"type": "fixed_quantity", "quantity": 1., "scale_by_signal_strength": False},
+        sizing_point_value=1., exit_params={}, force_close_at_end=False,
+        strategy_callback=strategy_callback, entry_callback=entry_callback,
+        intrabar=tape_source({1: [100., 94., 104., 106.]}, []),
+    )
+first_reached = lists_run(lambda bar, positions: (
+    {"entry": 1, "strength": 1.} if bar == 0 else
+    {"exit_long": True, "exit_prices": [105., 95.]} if bar == 1 else {}
+))
+assert first_reached["exit_price"].tolist() == [95.]
+assert first_reached["exit_candidate"].tolist() == [1]
+assert first_reached["entry_candidate"].tolist() == [-1]
+entry_seen = []
+def split_entry(bar, positions):
+    entry_seen.append((bar, len(positions)))
+    if bar == 0:
+        return {"entry": 1, "strength": 1.}
+    if bar == 1:
+        return {"entry": 1, "strength": 1.,
+                "entry_candidates": [(1, 105., NAN, NAN), (-1, 103., 110., 90.)]}
+    return {}
+split = lists_run(
+    lambda bar, positions: {"exit_long": True, "exit_prices": [95.]} if bar == 1 else {},
+    split_entry,
+)
+assert entry_seen[:2] == [(0, 0), (1, 0)]
+assert split["side"].tolist() == [1, -1]
+assert split["entry_price"].tolist() == [100., 103.]
+assert split["entry_candidate"].tolist() == [-1, 1]
+assert split["final_stop_price"].tolist()[1] == 110.
+for strategy_callback, entry_callback, message in [
+    (lambda bar, positions: {"exit_long": True, "exit_price": 95., "exit_prices": [95.]}, None,
+     "exit_prices"),
+    (lambda bar, positions: {"entry": 1, "entry_candidates": [(0, 100., NAN, NAN)]}, None,
+     "entry_candidates"),
+    (lambda bar, positions: {"entry": 1, "entry_price": 100., "entry_candidates": []}, None,
+     "entry_candidates"),
+    (lambda bar, positions: {"entry": 1, "strength": 1.}, lambda bar, positions: {}, "entry"),
+    (lambda bar, positions: {}, lambda bar, positions: {"exit_long": True}, "exit_long"),
+]:
+    try:
+        lists_run(strategy_callback, entry_callback)
+    except ValueError as exc:
+        assert message in str(exc), exc
+    else:
+        raise AssertionError(f"accepted an invalid order list for {message}")
 # Runtime levels: the six-value decision carries the stop, and a stop fills at its traded price.
 calls = []
 def levelled(bar, positions):

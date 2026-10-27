@@ -3,9 +3,9 @@
 use std::collections::BTreeMap;
 
 use q_engine::{
-    run_candle_with_callback, BarSignals, CandleConfig, CandleError, CandleInputs, ExitParams,
-    IntrabarPrices, IntrabarSource, PositionSnapshot, RestingKind, RestingOrder, SignalColumns,
-    Sizing,
+    run_candle_with_callback, BarSignals, CandleConfig, CandleError, CandleInputs, EntryCandidate,
+    ExitParams, IntrabarPrices, IntrabarSource, PositionSnapshot, RestingKind, RestingOrder, Side,
+    SignalColumns, Sizing,
 };
 
 const SECOND: i64 = 1_000_000;
@@ -116,7 +116,7 @@ fn signal_close_uses_the_first_trade_that_reaches_the_price() {
                 },
                 2 => BarSignals {
                     exit_long: true,
-                    exit_price: Some(103.0),
+                    exit_prices: vec![103.0],
                     ..BarSignals::default()
                 },
                 _ => BarSignals::default(),
@@ -147,9 +147,13 @@ fn priced_entry_after_signal_close_starts_at_the_close_tick() {
                 1 => BarSignals {
                     entry: 1,
                     strength: 1.0,
-                    entry_price: Some(100.0),
+                    entry_candidates: Some(vec![EntryCandidate {
+                        side: Side::Long,
+                        price: 100.0,
+                        levels: None,
+                    }]),
                     exit_long: true,
-                    exit_price: Some(95.0),
+                    exit_prices: vec![95.0],
                     ..BarSignals::default()
                 },
                 _ => BarSignals::default(),
@@ -184,14 +188,18 @@ fn a_later_bar_signal_close_uses_that_bars_start_after_a_late_entry_touch() {
                 1 => BarSignals {
                     entry: 1,
                     strength: 1.0,
-                    entry_price: Some(100.0),
+                    entry_candidates: Some(vec![EntryCandidate {
+                        side: Side::Long,
+                        price: 100.0,
+                        levels: None,
+                    }]),
                     exit_long: true,
-                    exit_price: Some(95.0),
+                    exit_prices: vec![95.0],
                     ..BarSignals::default()
                 },
                 2 => BarSignals {
                     exit_long: true,
-                    exit_price: Some(101.0),
+                    exit_prices: vec![101.0],
                     ..BarSignals::default()
                 },
                 _ => BarSignals::default(),
@@ -225,7 +233,7 @@ fn close_scan_starts_at_a_resting_position_fill_time() {
             }),
             1 => Ok(BarSignals {
                 exit_long: true,
-                exit_price: Some(101.0),
+                exit_prices: vec![101.0],
                 ..BarSignals::default()
             }),
             _ => Ok(BarSignals::default()),
@@ -259,7 +267,7 @@ fn equal_timestamp_prices_before_a_resting_fill_are_not_scanned_for_close() {
             }),
             1 => Ok(BarSignals {
                 exit_long: true,
-                exit_price: Some(100.0),
+                exit_prices: vec![100.0],
                 ..BarSignals::default()
             }),
             _ => Ok(BarSignals::default()),
@@ -293,7 +301,7 @@ fn a_resting_fill_print_itself_cannot_fill_a_priced_close() {
             }),
             1 => Ok(BarSignals {
                 exit_long: true,
-                exit_price: Some(102.0),
+                exit_prices: vec![102.0],
                 ..BarSignals::default()
             }),
             _ => Ok(BarSignals::default()),
@@ -323,7 +331,7 @@ fn short_signal_close_fills_at_the_requested_price_when_the_tape_trades_through_
                 },
                 2 => BarSignals {
                     exit_short: true,
-                    exit_price: Some(103.0),
+                    exit_prices: vec![103.0],
                     ..BarSignals::default()
                 },
                 _ => BarSignals::default(),
@@ -353,7 +361,7 @@ fn long_close_above_the_scan_start_fills_when_the_tape_rises_to_the_price() {
                 },
                 2 => BarSignals {
                     exit_long: true,
-                    exit_price: Some(103.0),
+                    exit_prices: vec![103.0],
                     ..BarSignals::default()
                 },
                 _ => BarSignals::default(),
@@ -383,7 +391,7 @@ fn short_close_below_the_scan_start_fills_when_the_tape_falls_to_the_price() {
                 },
                 2 => BarSignals {
                     exit_short: true,
-                    exit_price: Some(97.0),
+                    exit_prices: vec![97.0],
                     ..BarSignals::default()
                 },
                 _ => BarSignals::default(),
@@ -413,7 +421,7 @@ fn a_close_at_the_first_scanned_price_fills_on_that_trade() {
                 },
                 2 => BarSignals {
                     exit_long: true,
-                    exit_price: Some(100.0),
+                    exit_prices: vec![100.0],
                     ..BarSignals::default()
                 },
                 _ => BarSignals::default(),
@@ -444,7 +452,7 @@ fn protective_stop_that_fills_first_wins_over_the_decision_exit_price() {
                 },
                 1 => BarSignals {
                     exit_long: true,
-                    exit_price: Some(96.0),
+                    exit_prices: vec![96.0],
                     ..BarSignals::default()
                 },
                 _ => BarSignals::default(),
@@ -474,7 +482,7 @@ fn an_unreached_decision_price_does_not_queue_a_next_open_close() {
                 },
                 2 => BarSignals {
                     exit_long: true,
-                    exit_price: Some(100.0),
+                    exit_prices: vec![100.0],
                     ..BarSignals::default()
                 },
                 _ => BarSignals::default(),
@@ -503,7 +511,7 @@ fn exit_price_validation_names_the_bar_and_column() {
                 },
                 1 => BarSignals {
                     exit_long: true,
-                    exit_price: Some(111.0),
+                    exit_prices: vec![111.0],
                     ..BarSignals::default()
                 },
                 _ => BarSignals::default(),
@@ -534,7 +542,7 @@ fn exit_price_validation_names_the_bar_and_column() {
                 },
                 1 => BarSignals {
                     exit_long: true,
-                    exit_price: Some(105.0),
+                    exit_prices: vec![105.0],
                     ..BarSignals::default()
                 },
                 _ => BarSignals::default(),
@@ -564,7 +572,7 @@ fn exit_price_validation_names_the_bar_and_column() {
                 },
                 1 => BarSignals {
                     exit_long: true,
-                    exit_price: Some(f64::INFINITY),
+                    exit_prices: vec![f64::INFINITY],
                     ..BarSignals::default()
                 },
                 _ => BarSignals::default(),

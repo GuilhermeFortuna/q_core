@@ -9,8 +9,8 @@ use std::collections::BTreeMap;
 
 use q_engine::{
     run_candle_with_callback, BarSignals, CandleConfig, CandleError, CandleInputs, CandleRun,
-    DayTradeWindow, ExitParams, ExitReason, IntrabarPrices, IntrabarSource, RestingKind,
-    RestingOrder, SignalColumns, Sizing,
+    DayTradeWindow, EntryCandidate, ExitParams, ExitReason, IntrabarPrices, IntrabarSource,
+    RestingKind, RestingOrder, Side, SignalColumns, Sizing,
 };
 
 #[test]
@@ -165,9 +165,11 @@ impl Series {
         };
         let mut by_bar = vec![BarSignals::default(); n];
         for (bar, signals) in decisions {
-            by_bar[*bar] = *signals;
+            by_bar[*bar] = signals.clone();
         }
-        run_candle_with_callback(&inputs, config, |bar, _| Ok::<_, CandleError>(by_bar[bar]))
+        run_candle_with_callback(&inputs, config, |bar, _| {
+            Ok::<_, CandleError>(by_bar[bar].clone())
+        })
     }
 }
 
@@ -540,7 +542,11 @@ fn priced_entry_after_resting_fill_and_same_bar_stop_requires_a_later_touch() {
                     BarSignals {
                         entry: 1,
                         strength: 1.0,
-                        entry_price: Some(100.0),
+                        entry_candidates: Some(vec![EntryCandidate {
+                            side: Side::Long,
+                            price: 100.0,
+                            levels: None,
+                        }]),
                         ..BarSignals::default()
                     },
                 ),

@@ -66,7 +66,29 @@ fills at the requested price, timed at the first eligible trade that reaches it 
 scan started on: at or above it when the first scanned trade is below it, otherwise at or below
 it. If no trade reaches the price, the position stays open and the decision does not fall back to
 a next-open close. Without `exit_price`, signal closes still fill at the next bar's open. Rust
-callbacks set `BarSignals::exit_price`.
+callbacks set `BarSignals::exit_prices`.
+
+### Order lists
+
+A decision may offer several prices and let the bar's tape choose:
+
+- **Exits.** `exit_prices` (Rust `BarSignals::exit_prices`) lists the close's candidate prices; the
+  `dict` form's `exit_price` is a list of one, and the two keys cannot be combined. Each position
+  closes at the candidate its scan reaches first, by the rule above; a tie on one trade goes to the
+  earlier listed price. `close_next_open` keeps the next-open close when no candidate is reached.
+  The ledger's `exit_candidate` is the winning index, `-1` for every other exit.
+- **Entries.** `entry_candidates` (Rust `BarSignals::entry_candidates`) lists priced market entries
+  as `(side, price, stop_price, target_price)`, `NaN` for an unset level. They require a market
+  entry decision (`entry` of `1` or `-1`; a resting order cannot be combined with them) and cannot
+  be combined with a market `entry_price`, which is a list of one. Every price must lie in the
+  bar's range. With more than one candidate, or after a same-bar exit, the kernel reads the tape:
+  the candidate touched first fills, the earlier listed one on a tie, and the others are cancelled.
+  The ledger's `entry_candidate` is the winning index, `-1` for every other entry. If none is
+  touched after a same-bar exit, each is reported in `rejected` with reason `1`.
+- **Split decisions.** `entry_callback` (Rust `RuntimeCallbacks::entry`) decides entries after the
+  strategy callback's priced closes resolve, so it receives the positions left open then; the
+  strategy callback then decides exits only. Each callback must leave the other's fields unset.
+  Without `entry_callback` a single callback decides both, as before.
 
 ## Intrabar Protective Orders (`q-engine::candle`)
 

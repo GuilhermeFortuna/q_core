@@ -38,6 +38,19 @@ pub struct Decision {
     pub entry: Option<QueuedEntry>,
 }
 
+/// The entry a bar's signals decide, before engine gating.
+pub(crate) fn queued_entry(signals: &BarSignals) -> Option<QueuedEntry> {
+    let side = match signals.entry {
+        1 => Side::Long,
+        -1 => Side::Short,
+        _ => return None,
+    };
+    Some(QueuedEntry {
+        side,
+        strength: signals.strength,
+    })
+}
+
 /// Section D with exit-rule state that persists across calls.
 pub struct DecisionStep {
     book: ExitBook,
@@ -154,21 +167,9 @@ impl DecisionStep {
             }
         }
 
-        let entry = match signals.entry {
-            1 => Some(QueuedEntry {
-                side: Side::Long,
-                strength: signals.strength,
-            }),
-            -1 => Some(QueuedEntry {
-                side: Side::Short,
-                strength: signals.strength,
-            }),
-            _ => None,
-        };
-
         Decision {
             exits: queued,
-            entry,
+            entry: queued_entry(&signals),
         }
     }
 

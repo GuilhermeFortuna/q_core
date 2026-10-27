@@ -15,11 +15,11 @@ use q_engine::{
     resolve_bar_ms as resolve_bar_ms_rs, run_candle_with_callbacks,
     sample_at_bar_ends as sample_at_bar_ends_rs, simulate_ticks, tick_bars as tick_bars_rs,
     tick_day_bounds as tick_day_bounds_rs, BarSignals, CandleConfig, CandleError, CandleInputs,
-    Costs, DayTradeWindow, DecisionStep, EntryFilledFn, ExitInputs, ExitParams, ExitRuleId,
-    ExitRuleSet, IntrabarPrices, IntrabarSource, ParamValue, PositionKey, PositionSnapshot,
-    ProtectiveColumns, QueuedEntry, RestingKind, RestingOrder, RuleState, RuntimeCallbacks,
-    SessionLoader, SessionTickBars, SessionTickError, SessionTicks, Side, SignalColumns, Sizing,
-    StrategyFn, TickError, TickInputs, TickSizing, TradeView,
+    Costs, DayTradeWindow, DecisionStep, EntryCandidate, EntryFilledFn, ExitInputs, ExitParams,
+    ExitRuleId, ExitRuleSet, IntrabarPrices, IntrabarSource, ParamValue, PositionKey,
+    PositionSnapshot, ProtectiveColumns, QueuedEntry, RestingKind, RestingOrder, RuleState,
+    RuntimeCallbacks, SessionLoader, SessionTickBars, SessionTickError, SessionTicks, Side,
+    SignalColumns, Sizing, StrategyFn, TickError, TickInputs, TickSizing, TradeView,
 };
 
 create_exception!(q_core_engine, IntrabarDataError, PyValueError);
@@ -457,6 +457,7 @@ fn extract_f64<'py>(
     strategy_callback=None,
     snapshot_levels=false,
     entry_fill_callback=None,
+    entry_callback=None,
 ))]
 fn py_run_candle<'py>(
     py: Python<'py>,
@@ -489,6 +490,7 @@ fn py_run_candle<'py>(
     strategy_callback: Option<&Bound<'py, PyAny>>,
     snapshot_levels: bool,
     entry_fill_callback: Option<&Bound<'py, PyAny>>,
+    entry_callback: Option<&Bound<'py, PyAny>>,
 ) -> PyResult<Bound<'py, PyDict>> {
     require_int8("entry", entry)?;
     let entry_arr: PyReadonlyArray1<'py, i8> = entry.extract()?;
@@ -741,6 +743,13 @@ fn py_run_candle<'py>(
             strategy_decision(&returned, bar)
         }
     });
+    let mut entry = entry_callback.map(|callback| {
+        move |bar: usize, positions: &[PositionSnapshot]| -> Result<BarSignals, StrategyRunError> {
+            let snapshot = position_tuples(py, positions, snapshot_levels)?;
+            let returned = callback.call1((bar, snapshot))?;
+            strategy_decision(&returned, bar)
+        }
+    });
     let mut entry_filled = entry_fill_callback.map(|callback| {
         move |bar: usize, positions: &[PositionSnapshot]| -> Result<bool, StrategyRunError> {
             let snapshot = position_tuples(py, positions, snapshot_levels)?;
@@ -759,6 +768,9 @@ fn py_run_candle<'py>(
         &config,
         RuntimeCallbacks {
             strategy: strategy
+                .as_mut()
+                .map(|closure| closure as &mut StrategyFn<'_, StrategyRunError>),
+            entry: entry
                 .as_mut()
                 .map(|closure| closure as &mut StrategyFn<'_, StrategyRunError>),
             entry_filled: entry_filled
@@ -867,6 +879,14 @@ fn py_run_candle<'py>(
         "final_target_price",
         PyArray1::from_vec(py, ledger.final_target_price.clone()),
     )?;
+    out.set_item(
+        "entry_candidate",
+        PyArray1::from_vec(py, ledger.entry_candidate.clone()),
+    )?;
+    out.set_item(
+        "exit_candidate",
+        PyArray1::from_vec(py, ledger.exit_candidate.clone()),
+    )?;
 
     Ok(out)
 }
@@ -904,7 +924,7 @@ fn position_tuples<'py>(
 }
 
 /// Keys a decision `dict` may carry. Missing keys take their defaults.
-const DECISION_KEYS: [&str; 13] = [
+const DECISION_KEYS: [&str; 16] = [
     "entry",
     "exit_long",
     "exit_short",
@@ -918,6 +938,9 @@ const DECISION_KEYS: [&str; 13] = [
     "amend_stop",
     "amend_target",
     "exit_price",
+    "exit_prices",
+    "close_next_open",
+    "entry_candidates",
 ];
 
 /// A strategy decision: either the tuple forms or a `dict` naming each field. Errors name the bar
@@ -933,7 +956,9 @@ fn strategy_decision(
 }
 
 /// The `dict` form. `None` counts as an absent key. A stop or limit entry takes its order price from
-/// `entry_price`; a market entry takes a priced entry from it, `NaN` meaning none.
+/// `entry_price`; a market entry takes a priced entry from it, `NaN` meaning none, or several from
+/// `entry_candidates`, a sequence of `(side, price, stop_price, target_price)`. A close takes its
+/// intrabar prices from `exit_prices`, or one from `exit_price`.
 fn decision_dict(dict: &Bound<'_, PyDict>, bar: usize) -> Result<BarSignals, StrategyRunError> {
     let invalid = |key: &str, reason: &str| {
         StrategyRunError::Python(PyValueError::new_err(format!(
@@ -1037,6 +1062,41 @@ fn decision_dict(dict: &Bound<'_, PyDict>, bar: usize) -> Result<BarSignals, Str
     let amend = |key: &str| -> Result<Option<f64>, StrategyRunError> {
         Ok(number(key)?.filter(|value| !value.is_nan()))
     };
+    let entry_candidates = match (get("entry_candidates")?, entry_price) {
+        (Some(_), Some(_)) => {
+            return Err(invalid(
+                "entry_candidates",
+                "cannot be combined with a market entry_price",
+            ))
+        }
+        (Some(value), None) => Some(
+            sequence(&value)
+                .map_err(|_| invalid("entry_candidates", "must be a sequence"))?
+                .iter()
+                .enumerate()
+                .map(|(index, item)| entry_candidate(item, bar, index))
+                .collect::<Result<Vec<_>, _>>()?,
+        ),
+        (None, price) => price.map(|price| legacy_candidate(entry, price, levels)),
+    };
+    let exit_price = amend("exit_price")?;
+    let exit_prices = match (get("exit_prices")?, exit_price) {
+        (Some(_), Some(_)) => {
+            return Err(invalid("exit_prices", "cannot be combined with exit_price"))
+        }
+        (Some(value), None) => sequence(&value)
+            .map_err(|_| invalid("exit_prices", "must be a sequence of numbers"))?
+            .iter()
+            .map(|item| {
+                if item.is_instance_of::<PyBool>() {
+                    return Err(invalid("exit_prices", "must be a sequence of numbers"));
+                }
+                item.extract::<f64>()
+                    .map_err(|_| invalid("exit_prices", "must be a sequence of numbers"))
+            })
+            .collect::<Result<Vec<_>, _>>()?,
+        (None, price) => price.into_iter().collect(),
+    };
 
     Ok(BarSignals {
         entry,
@@ -1044,13 +1104,72 @@ fn decision_dict(dict: &Bound<'_, PyDict>, bar: usize) -> Result<BarSignals, Str
         exit_short: flag("exit_short")?,
         strength: number("strength")?.unwrap_or(0.0),
         levels,
-        entry_price,
+        entry_candidates,
         resting,
         cancel_entry: flag("cancel_entry")?,
         amend_stop: amend("amend_stop")?,
         amend_target: amend("amend_target")?,
-        exit_price: amend("exit_price")?,
+        exit_prices,
+        close_next_open: flag("close_next_open")?,
     })
+}
+
+fn sequence<'py>(value: &Bound<'py, PyAny>) -> PyResult<Vec<Bound<'py, PyAny>>> {
+    if value.is_instance_of::<pyo3::types::PyString>() {
+        return Err(PyTypeError::new_err("a string is not a sequence of values"));
+    }
+    value.try_iter()?.collect()
+}
+
+/// One `(side, price, stop_price, target_price)` entry candidate. `NaN` levels are unset.
+fn entry_candidate(
+    item: &Bound<'_, PyAny>,
+    bar: usize,
+    index: usize,
+) -> Result<EntryCandidate, StrategyRunError> {
+    let invalid = || {
+        StrategyRunError::Python(PyValueError::new_err(format!(
+            "strategy_callback decision entry_candidates[{bar}][{index}]: must be (side, price, stop_price, target_price) with side 1 or -1"
+        )))
+    };
+    let values = sequence(item).map_err(|_| invalid())?;
+    if values.len() != 4 || values[0].is_instance_of::<PyBool>() {
+        return Err(invalid());
+    }
+    let side = match values[0].extract::<i8>().map_err(|_| invalid())? {
+        1 => Side::Long,
+        -1 => Side::Short,
+        _ => return Err(invalid()),
+    };
+    let number = |value: &Bound<'_, PyAny>| -> Result<f64, StrategyRunError> {
+        if value.is_instance_of::<PyBool>() {
+            return Err(invalid());
+        }
+        value.extract::<f64>().map_err(|_| invalid())
+    };
+    Ok(EntryCandidate {
+        side,
+        price: number(&values[1])?,
+        levels: Some((number(&values[2])?, number(&values[3])?)),
+    })
+}
+
+/// A single `entry_price` as the one candidate of the decided side; `NaN` offers none. An entry of
+/// `0` decides nothing, so its price is ignored as it always was.
+fn legacy_candidate(entry: i8, price: f64, levels: Option<(f64, f64)>) -> Vec<EntryCandidate> {
+    let side = match entry {
+        1 => Side::Long,
+        -1 => Side::Short,
+        _ => return Vec::new(),
+    };
+    if price.is_nan() {
+        return Vec::new();
+    }
+    vec![EntryCandidate {
+        side,
+        price,
+        levels,
+    }]
 }
 
 /// `(entry, exit_long, exit_short, strength)`, optionally followed by the `(stop_price,
@@ -1077,6 +1196,7 @@ fn strategy_tuple(returned: &Bound<'_, PyAny>) -> Result<BarSignals, StrategyRun
             "strategy_callback requires integer entry and boolean exit flags",
         )));
     }
+    let entry_value: i8 = entry.extract()?;
     let levels = if tuple.len() >= 6 {
         let stop: f64 = tuple.get_item(4)?.extract()?;
         let target: f64 = tuple.get_item(5)?.extract()?;
@@ -1096,13 +1216,16 @@ fn strategy_tuple(returned: &Bound<'_, PyAny>) -> Result<BarSignals, StrategyRun
         None
     };
     Ok(BarSignals {
-        entry: entry.extract()?,
+        entry: entry_value,
         exit_long: long.extract()?,
         exit_short: short.extract()?,
         strength: tuple.get_item(3)?.extract()?,
         levels,
-        entry_price,
-        exit_price: exit_price.filter(|price| !price.is_nan()),
+        entry_candidates: entry_price.map(|price| legacy_candidate(entry_value, price, levels)),
+        exit_prices: exit_price
+            .filter(|price| !price.is_nan())
+            .into_iter()
+            .collect(),
         ..BarSignals::default()
     })
 }
