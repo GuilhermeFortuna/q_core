@@ -270,32 +270,22 @@ fn priced_signal_exit(
         .iter_mut()
         .filter(|trade| trade.open && trade.side == side)
     {
-        let fill_time = match trade.kind {
-            EntryKind::Stop | EntryKind::Limit => trade.entry_time_us,
-            EntryKind::Priced if trade.entry_bar == bar => prices
-                .time_us
-                .get(trade.first_tick)
-                .copied()
-                .unwrap_or(i64::MAX),
-            EntryKind::Priced => inputs.time_us[bar],
-            EntryKind::Open => inputs.time_us[bar],
-        };
-        let first_time = inputs.time_us[bar].max(fill_time);
-        let mut scanned = prices
-            .time_us
-            .iter()
-            .zip(&prices.price)
-            .enumerate()
-            .skip_while(|(_, (time, _))| **time < first_time)
-            .peekable();
+        let first_tick = match trade.kind {
+            EntryKind::Stop | EntryKind::Limit | EntryKind::Priced if trade.entry_bar == bar => {
+                trade.first_tick.saturating_add(1)
+            }
+            _ => 0,
+        }
+        .min(prices.price.len());
         // The tape reaches the price from whichever side the scan starts on, and the close fills
-        // at the requested price itself.
-        let start_below = scanned.peek().map(|(_, (_, price))| **price < requested);
-        let reached = scanned.find(|(_, (_, price))| match start_below {
-            Some(true) => **price >= requested,
-            _ => **price <= requested,
+        // at the requested price itself. Tick indices preserve source order when timestamps tie.
+        let start_below = prices.price.get(first_tick).map(|price| *price < requested);
+        let reached = (first_tick..prices.price.len()).find(|&tick| match start_below {
+            Some(true) => prices.price[tick] >= requested,
+            _ => prices.price[tick] <= requested,
         });
-        if let Some((tick, (&time_us, _))) = reached {
+        if let Some(tick) = reached {
+            let time_us = prices.time_us[tick];
             let pnl = close_trade(trade, bar, requested, ExitReason::Signal, config);
             trade.exit_time_us = time_us;
             *capital += pnl;
