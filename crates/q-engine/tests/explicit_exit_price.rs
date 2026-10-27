@@ -150,6 +150,47 @@ fn priced_entry_after_signal_close_starts_at_the_close_tick() {
 }
 
 #[test]
+fn a_later_bar_signal_close_uses_that_bars_start_after_a_late_entry_touch() {
+    let tape = Tape(BTreeMap::from([
+        (1, vec![100.0, 95.0, 100.0]),
+        (2, vec![101.0]),
+    ]));
+    let result = run(
+        &[1, 0, 0],
+        &[100.0, 100.0, 100.0],
+        &[100.0, 101.0, 101.0],
+        &[100.0, 90.0, 99.0],
+        Some(&tape),
+        |bar, _| {
+            Ok(match bar {
+                0 => BarSignals {
+                    entry: 1,
+                    strength: 1.0,
+                    ..BarSignals::default()
+                },
+                1 => BarSignals {
+                    entry: 1,
+                    strength: 1.0,
+                    entry_price: Some(100.0),
+                    exit_long: true,
+                    exit_price: Some(95.0),
+                    ..BarSignals::default()
+                },
+                2 => BarSignals {
+                    exit_long: true,
+                    exit_price: Some(101.0),
+                    ..BarSignals::default()
+                },
+                _ => BarSignals::default(),
+            })
+        },
+    )
+    .unwrap();
+    assert_eq!(result.trades.exit_bar, vec![1, 2]);
+    assert_eq!(result.trades.exit_price, vec![95.0, 101.0]);
+}
+
+#[test]
 fn close_scan_starts_at_a_resting_position_fill_time() {
     let tape = Tape(BTreeMap::from([(1, vec![101.0, 102.0, 103.0, 101.0])]));
     let result = run(

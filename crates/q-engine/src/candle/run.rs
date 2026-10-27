@@ -272,11 +272,12 @@ fn priced_signal_exit(
     {
         let fill_time = match trade.kind {
             EntryKind::Stop | EntryKind::Limit => trade.entry_time_us,
-            EntryKind::Priced => prices
+            EntryKind::Priced if trade.entry_bar == bar => prices
                 .time_us
                 .get(trade.first_tick)
                 .copied()
                 .unwrap_or(i64::MAX),
+            EntryKind::Priced => inputs.time_us[bar],
             EntryKind::Open => inputs.time_us[bar],
         };
         let first_time = inputs.time_us[bar].max(fill_time);
