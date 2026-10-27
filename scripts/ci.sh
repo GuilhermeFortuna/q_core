@@ -13,9 +13,10 @@ fi
 # Enter the host user ci.slice when available so local CI yields to interactive work.
 # Scope gets Nice=10 + idle ionice so install/clone/build IO is deprioritized too.
 # No-ops on hosts/runners without systemd-run or the slice (e.g. GitHub Actions).
+# `systemctl cat` checks the unit exists; `status` fails while the slice is empty.
 if [[ "${CI_RESOURCE_CONTROLLED:-0}" != "1" ]]; then
   if command -v systemd-run >/dev/null 2>&1 &&
-     systemctl --user status ci.slice >/dev/null 2>&1; then
+     systemctl --user cat ci.slice >/dev/null 2>&1; then
     _ci_run=(
       systemd-run --user --scope --quiet --collect --slice=ci.slice --nice=10
       --setenv=CI_RESOURCE_CONTROLLED=1
