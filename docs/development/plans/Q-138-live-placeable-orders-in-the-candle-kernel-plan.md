@@ -31,10 +31,10 @@ Every existing order keeps its exact fills.
 **Files:** `crates/q-engine/src/candle/inputs.rs`, `decision.rs`, `run.rs`, `protective.rs` as needed,
 `crates/q-engine/tests/oco_groups_gate.rs` (new).
 
-- [ ] Write failing gates for the OCO cases in acceptance 3.
-- [ ] Generalise the single working entry to a group with first-fill cancellation, keeping the single resting
+- [x] Write failing gates for the OCO cases in acceptance 3.
+- [x] Generalise the single working entry to a group with first-fill cancellation, keeping the single resting
   entry as a group of one with identical fills. Apply the Q-132 rule to members.
-- [ ] Run all `q-engine` tests. Commit.
+- [x] Run all `q-engine` tests. Commit.
 
 ### 3. Timed orders and latency
 

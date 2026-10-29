@@ -239,8 +239,12 @@ fn test_legacy_form_1_bracket() {
 fn run_new_1_oco() -> CandleRun {
     let fixture = gate_1_fixture();
     fixture.run(
-        Box::new(|bar, _positions| match bar {
+        Box::new(|_bar, _positions| Ok(BarSignals::default())),
+        Some(Box::new(|bar, _positions| match bar {
             0 => Ok(BarSignals {
+                entry: 1,
+                strength: 1.0,
+                levels: Some((95.0, 110.0)),
                 oco_group: Some(vec![
                     OcoOrder {
                         side: Side::Long,
@@ -259,15 +263,6 @@ fn run_new_1_oco() -> CandleRun {
                         expire_time_us: None,
                     },
                 ]),
-                ..BarSignals::default()
-            }),
-            _ => Ok(BarSignals::default()),
-        }),
-        Some(Box::new(|bar, _positions| match bar {
-            0 => Ok(BarSignals {
-                entry: 1,
-                strength: 1.0,
-                levels: Some((95.0, 110.0)),
                 ..BarSignals::default()
             }),
             _ => Ok(BarSignals::default()),
