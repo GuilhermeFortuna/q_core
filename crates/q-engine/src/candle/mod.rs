@@ -9,7 +9,7 @@ mod sizing;
 pub(crate) use config::side_cost;
 pub use config::{CandleConfig, CandleError, Costs, DayTradeWindow};
 pub use decision::{Decision, DecisionStep, QueuedEntry, QueuedExit, TradeView};
-pub use inputs::{BarSignals, CandleInputs, EntryCandidate, SignalColumns};
+pub use inputs::{BarSignals, CandleInputs, EntryCandidate, OcoOrder, SignalColumns};
 pub use protective::{
     IntrabarPrices, IntrabarSource, ProtectiveColumns, RejectedEntries, RestingKind, RestingOrder,
 };

@@ -16,7 +16,7 @@ use q_engine::{
     sample_at_bar_ends as sample_at_bar_ends_rs, simulate_ticks, tick_bars as tick_bars_rs,
     tick_day_bounds as tick_day_bounds_rs, BarSignals, CandleConfig, CandleError, CandleInputs,
     Costs, DayTradeWindow, DecisionStep, EntryCandidate, EntryFilledFn, ExitInputs, ExitParams,
-    ExitRuleId, ExitRuleSet, IntrabarPrices, IntrabarSource, ParamValue, PositionKey,
+    ExitRuleId, ExitRuleSet, IntrabarPrices, IntrabarSource, OcoOrder, ParamValue, PositionKey,
     PositionSnapshot, ProtectiveColumns, QueuedEntry, RestingKind, RestingOrder, RuleState,
     RuntimeCallbacks, SessionLoader, SessionTickBars, SessionTickError, SessionTicks, Side,
     SignalColumns, Sizing, StrategyFn, TickError, TickInputs, TickSizing, TradeView,
@@ -458,6 +458,7 @@ fn extract_f64<'py>(
     snapshot_levels=false,
     entry_fill_callback=None,
     entry_callback=None,
+    latency_us=0,
 ))]
 fn py_run_candle<'py>(
     py: Python<'py>,
@@ -491,6 +492,7 @@ fn py_run_candle<'py>(
     snapshot_levels: bool,
     entry_fill_callback: Option<&Bound<'py, PyAny>>,
     entry_callback: Option<&Bound<'py, PyAny>>,
+    latency_us: i64,
 ) -> PyResult<Bound<'py, PyDict>> {
     require_int8("entry", entry)?;
     let entry_arr: PyReadonlyArray1<'py, i8> = entry.extract()?;
@@ -623,6 +625,7 @@ fn py_run_candle<'py>(
             }
         }),
         force_close_at_end,
+        latency_us,
     };
 
     // Host code can retain and mutate its numpy arrays; callback runs read owned copies.
@@ -924,7 +927,7 @@ fn position_tuples<'py>(
 }
 
 /// Keys a decision `dict` may carry. Missing keys take their defaults.
-const DECISION_KEYS: [&str; 16] = [
+const DECISION_KEYS: [&str; 21] = [
     "entry",
     "exit_long",
     "exit_short",
@@ -934,6 +937,8 @@ const DECISION_KEYS: [&str; 16] = [
     "entry_price",
     "entry_kind",
     "expire_bars",
+    "expire_time_us",
+    "expire_at",
     "cancel_entry",
     "amend_stop",
     "amend_target",
@@ -941,6 +946,9 @@ const DECISION_KEYS: [&str; 16] = [
     "exit_prices",
     "close_next_open",
     "entry_candidates",
+    "oco_group",
+    "timed_exit",
+    "cancel_timed_exit",
 ];
 
 /// A strategy decision: either the tuple forms or a `dict` naming each field. Errors name the bar
@@ -1037,6 +1045,24 @@ fn decision_dict(dict: &Bound<'_, PyDict>, bar: usize) -> Result<BarSignals, Str
             )
         }
     };
+    let expire_time_us = match get("expire_time_us")?.or(get("expire_at")?) {
+        None => None,
+        Some(value) => {
+            if kind.is_none() {
+                return Err(invalid(
+                    "expire_time_us",
+                    "requires entry_kind 'stop' or 'limit'",
+                ));
+            }
+            if value.is_instance_of::<PyBool>() {
+                return Err(invalid("expire_time_us", "must be an integer"));
+            }
+            let us: i64 = value
+                .extract()
+                .map_err(|_| invalid("expire_time_us", "must be an integer"))?;
+            Some(us)
+        }
+    };
     let (entry_price, resting) = match kind {
         Some(kind) => {
             let order_price = match price {
@@ -1054,6 +1080,7 @@ fn decision_dict(dict: &Bound<'_, PyDict>, bar: usize) -> Result<BarSignals, Str
                     kind,
                     price: order_price,
                     expire_bars,
+                    expire_time_us,
                 }),
             )
         }
@@ -1098,6 +1125,31 @@ fn decision_dict(dict: &Bound<'_, PyDict>, bar: usize) -> Result<BarSignals, Str
         (None, price) => price.into_iter().collect(),
     };
 
+    let oco_group = match get("oco_group")? {
+        None => None,
+        Some(value) => Some(
+            sequence(&value)
+                .map_err(|_| invalid("oco_group", "must be a sequence"))?
+                .iter()
+                .enumerate()
+                .map(|(index, item)| parse_oco_order(item, bar, index))
+                .collect::<Result<Vec<_>, _>>()?,
+        ),
+    };
+
+    let timed_exit = match get("timed_exit")? {
+        None => None,
+        Some(value) => {
+            if value.is_instance_of::<PyBool>() {
+                return Err(invalid("timed_exit", "must be an integer"));
+            }
+            let us: i64 = value
+                .extract()
+                .map_err(|_| invalid("timed_exit", "must be an integer"))?;
+            Some(us)
+        }
+    };
+
     Ok(BarSignals {
         entry,
         exit_long: flag("exit_long")?,
@@ -1111,6 +1163,186 @@ fn decision_dict(dict: &Bound<'_, PyDict>, bar: usize) -> Result<BarSignals, Str
         amend_target: amend("amend_target")?,
         exit_prices,
         close_next_open: flag("close_next_open")?,
+        oco_group,
+        timed_exit,
+        cancel_timed_exit: flag("cancel_timed_exit")?,
+    })
+}
+
+fn parse_oco_order(
+    item: &Bound<'_, PyAny>,
+    bar: usize,
+    index: usize,
+) -> Result<OcoOrder, StrategyRunError> {
+    let invalid = |reason: &str| {
+        StrategyRunError::Python(PyValueError::new_err(format!(
+            "strategy_callback decision oco_group[{bar}][{index}]: {reason}"
+        )))
+    };
+    if let Ok(dict) = item.downcast::<PyDict>() {
+        let get = |key: &str| -> PyResult<Option<Bound<'_, PyAny>>> {
+            Ok(dict.get_item(key)?.filter(|value| !value.is_none()))
+        };
+        let side_val = get("side")?.ok_or_else(|| invalid("side is required"))?;
+        let side = match side_val
+            .extract::<i8>()
+            .map_err(|_| invalid("side must be 1 or -1"))?
+        {
+            1 => Side::Long,
+            -1 => Side::Short,
+            _ => return Err(invalid("side must be 1 or -1")),
+        };
+        let kind_val = get("kind")?
+            .or(get("entry_kind")?)
+            .ok_or_else(|| invalid("kind is required"))?;
+        let kind = match kind_val.extract::<String>().ok().as_deref() {
+            Some("stop") => RestingKind::Stop,
+            Some("limit") => RestingKind::Limit,
+            _ => return Err(invalid("kind must be 'stop' or 'limit'")),
+        };
+        let price_val = get("price")?
+            .or(get("entry_price")?)
+            .ok_or_else(|| invalid("price is required"))?;
+        let price = price_val
+            .extract::<f64>()
+            .map_err(|_| invalid("price must be a number"))?;
+        let stop_price = match get("stop_price")? {
+            Some(v) => Some(
+                v.extract::<f64>()
+                    .map_err(|_| invalid("stop_price must be a number"))?,
+            ),
+            None => None,
+        };
+        let target_price = match get("target_price")? {
+            Some(v) => Some(
+                v.extract::<f64>()
+                    .map_err(|_| invalid("target_price must be a number"))?,
+            ),
+            None => None,
+        };
+        let levels = if stop_price.is_some() || target_price.is_some() {
+            Some((
+                stop_price.unwrap_or(f64::NAN),
+                target_price.unwrap_or(f64::NAN),
+            ))
+        } else {
+            None
+        };
+        let expire_bars = match get("expire_bars")? {
+            Some(v) => {
+                let b: i64 = v
+                    .extract()
+                    .map_err(|_| invalid("expire_bars must be an integer"))?;
+                Some(
+                    usize::try_from(b)
+                        .ok()
+                        .filter(|bars| *bars > 0)
+                        .ok_or_else(|| invalid("expire_bars must be a positive integer"))?,
+                )
+            }
+            None => None,
+        };
+        let expire_time_us = match get("expire_time_us")?.or(get("expire_at")?) {
+            Some(v) => {
+                if v.is_instance_of::<PyBool>() {
+                    return Err(invalid("expire_time_us must be an integer"));
+                }
+                Some(
+                    v.extract::<i64>()
+                        .map_err(|_| invalid("expire_time_us must be an integer"))?,
+                )
+            }
+            None => None,
+        };
+        return Ok(OcoOrder {
+            side,
+            kind,
+            price,
+            levels,
+            expire_bars,
+            expire_time_us,
+        });
+    }
+
+    let values = sequence(item).map_err(|_| invalid("must be a dict or sequence"))?;
+    if values.len() < 3 {
+        return Err(invalid("sequence must have at least (side, kind, price)"));
+    }
+    let side = match values[0]
+        .extract::<i8>()
+        .map_err(|_| invalid("side must be 1 or -1"))?
+    {
+        1 => Side::Long,
+        -1 => Side::Short,
+        _ => return Err(invalid("side must be 1 or -1")),
+    };
+    let kind = match values[1].extract::<String>().ok().as_deref() {
+        Some("stop") => RestingKind::Stop,
+        Some("limit") => RestingKind::Limit,
+        _ => return Err(invalid("kind must be 'stop' or 'limit'")),
+    };
+    let price = values[2]
+        .extract::<f64>()
+        .map_err(|_| invalid("price must be a number"))?;
+    let stop_price = if values.len() > 3 && !values[3].is_none() {
+        Some(
+            values[3]
+                .extract::<f64>()
+                .map_err(|_| invalid("stop_price must be a number"))?,
+        )
+    } else {
+        None
+    };
+    let target_price = if values.len() > 4 && !values[4].is_none() {
+        Some(
+            values[4]
+                .extract::<f64>()
+                .map_err(|_| invalid("target_price must be a number"))?,
+        )
+    } else {
+        None
+    };
+    let levels = if stop_price.is_some() || target_price.is_some() {
+        Some((
+            stop_price.unwrap_or(f64::NAN),
+            target_price.unwrap_or(f64::NAN),
+        ))
+    } else {
+        None
+    };
+    let expire_bars = if values.len() > 5 && !values[5].is_none() {
+        let b: i64 = values[5]
+            .extract()
+            .map_err(|_| invalid("expire_bars must be an integer"))?;
+        Some(
+            usize::try_from(b)
+                .ok()
+                .filter(|bars| *bars > 0)
+                .ok_or_else(|| invalid("expire_bars must be a positive integer"))?,
+        )
+    } else {
+        None
+    };
+    let expire_time_us = if values.len() > 6 && !values[6].is_none() {
+        if values[6].is_instance_of::<PyBool>() {
+            return Err(invalid("expire_time_us must be an integer"));
+        }
+        Some(
+            values[6]
+                .extract::<i64>()
+                .map_err(|_| invalid("expire_time_us must be an integer"))?,
+        )
+    } else {
+        None
+    };
+
+    Ok(OcoOrder {
+        side,
+        kind,
+        price,
+        levels,
+        expire_bars,
+        expire_time_us,
     })
 }
 

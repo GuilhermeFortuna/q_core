@@ -37,6 +37,7 @@ pub struct CandleConfig {
     pub exit_params: crate::ExitParams,
     pub day_trade: Option<DayTradeWindow>,
     pub force_close_at_end: bool,
+    pub latency_us: i64,
 }
 
 #[derive(Clone, Debug, PartialEq)]

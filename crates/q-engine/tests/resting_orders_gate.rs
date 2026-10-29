@@ -129,6 +129,7 @@ impl Series {
             exit_params: ExitParams::default(),
             day_trade,
             force_close_at_end: false,
+            latency_us: 0,
         }
     }
 
@@ -191,6 +192,7 @@ fn place(side: i8, kind: RestingKind, price: f64, expire_bars: Option<usize>) ->
             kind,
             price,
             expire_bars,
+            expire_time_us: None,
         }),
         ..BarSignals::default()
     }
@@ -532,6 +534,7 @@ fn priced_entry_after_resting_fill_and_same_bar_stop_requires_a_later_touch() {
                             kind: RestingKind::Stop,
                             price: 101.0,
                             expire_bars: None,
+                            expire_time_us: None,
                         }),
                         levels: Some((99.0, f64::NAN)),
                         ..BarSignals::default()
@@ -764,6 +767,7 @@ fn invalid_resting_and_amendment_fields_name_their_column() {
                     kind: STOP,
                     price: 101.0,
                     expire_bars: None,
+                    expire_time_us: None,
                 }),
                 ..BarSignals::default()
             },

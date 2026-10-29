@@ -74,6 +74,7 @@ fn run(tapes: &[&[f64]], mut strategy: Decide, entry: Option<Decide>) -> CandleR
             exit_params: Default::default(),
             day_trade: None,
             force_close_at_end: false,
+            latency_us: 0,
         },
         RuntimeCallbacks {
             strategy: Some(&mut *strategy as &mut StrategyFn<'_, CandleError>),
@@ -129,6 +130,7 @@ fn buy_stop() -> BarSignals {
             kind: RestingKind::Stop,
             price: 104.0,
             expire_bars: None,
+            expire_time_us: None,
         }),
         ..buy()
     }
@@ -328,6 +330,7 @@ fn a_split_strategy_callback_may_not_decide_entries() {
             exit_params: Default::default(),
             day_trade: None,
             force_close_at_end: false,
+            latency_us: 0,
         },
         RuntimeCallbacks {
             strategy: Some(&mut strategy),

@@ -93,6 +93,7 @@ fn run(
             exit_params: ExitParams::default(),
             day_trade: None,
             force_close_at_end: false,
+            latency_us: 0,
         },
         strategy,
     )
@@ -228,6 +229,7 @@ fn close_scan_starts_at_a_resting_position_fill_time() {
                     kind: RestingKind::Stop,
                     price: 102.0,
                     expire_bars: None,
+                    expire_time_us: None,
                 }),
                 ..BarSignals::default()
             }),
@@ -262,6 +264,7 @@ fn equal_timestamp_prices_before_a_resting_fill_are_not_scanned_for_close() {
                     kind: RestingKind::Stop,
                     price: 102.0,
                     expire_bars: None,
+                    expire_time_us: None,
                 }),
                 ..BarSignals::default()
             }),
@@ -296,6 +299,7 @@ fn a_resting_fill_print_itself_cannot_fill_a_priced_close() {
                     kind: RestingKind::Stop,
                     price: 102.0,
                     expire_bars: None,
+                    expire_time_us: None,
                 }),
                 ..BarSignals::default()
             }),

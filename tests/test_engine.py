@@ -170,6 +170,19 @@ for name in LEDGER:
     else:
         assert np.array_equal(got, want), name
 
+# Reference fixtures parity without optional arguments
+for path in sorted((FIXTURES / "candle_engine").glob("*.json")):
+    data = json.loads(path.read_text(encoding="utf-8"))
+    for case in data["cases"]:
+        out = run_fixture(case)
+        for name in LEDGER:
+            got = np.asarray(out[name])
+            want = col(case["expected"][name])
+            if name in float_cols:
+                assert np.allclose(got, want, equal_nan=True), f"{case['case_id']} {name}"
+            else:
+                assert np.array_equal(got, want), f"{case['case_id']} {name}"
+
 # k02 exit_reason_text for rule exits
 k02 = load_case("candle_engine", "k02_stop_target_rules")
 k02_out = run_fixture(k02)
@@ -938,6 +951,50 @@ for decision, needle in cases:
         assert needle in str(exc), str(exc)
     else:
         raise AssertionError(f"accepted invalid decision: {decision}")
+
+# OCO group of resting entries via python dict decision
+calls = []
+run = order_run(
+    {0: {"oco_group": [
+        {"side": 1, "kind": "stop", "price": 105.},
+        {"side": -1, "kind": "stop", "price": 95.},
+    ]}},
+    [(100., 100., 100.), (100., 105., 94.)],
+    intrabar=tape_source({1: [100., 94., 105.]}, calls),
+)
+assert run["entry_bar"].tolist() == [1]
+assert run["side"].tolist() == [-1]
+assert run["entry_price"].tolist() == [94.]
+assert run["entry_candidate"].tolist() == [1]
+
+# Timed exit via python dict decision
+run = order_run(
+    {0: {"entry": 1, "timed_exit": 11 * HOUR + 2 * SECOND}},
+    [(100., 100., 100.), (100., 102., 99.)],
+    intrabar=tape_source({1: [100., 101., 102.]}, []),
+)
+assert run["exit_bar"].tolist() == [1]
+assert run["exit_price"].tolist() == [102.]
+assert run["exit_reason_text"] == ["SIGNAL"]
+assert run["exit_time_us"].tolist() == [11 * HOUR + 2 * SECOND]
+
+# Expiry instant via python dict decision
+run = order_run(
+    {0: {"entry": 1, "entry_kind": "stop", "entry_price": 105., "expire_time_us": 11 * HOUR + SECOND}},
+    [(100., 100., 100.), (100., 106., 100.)],
+    intrabar=tape_source({1: [100., 101., 105.]}, []),
+)
+assert run["entry_bar"].tolist() == []
+
+# Placement latency skips early trades via python
+run = order_run(
+    {0: {"entry": 1, "entry_kind": "stop", "entry_price": 104.}},
+    [(100., 100., 100.), (100., 106., 100.)],
+    intrabar=tape_source({1: [100., 105., 102., 104.5]}, []),
+    latency_us=2 * SECOND,
+)
+assert run["entry_price"].tolist() == [104.5]
+assert run["entry_time_us"].tolist() == [11 * HOUR + 3 * SECOND]
 
 print("engine projection checks passed")
 """

@@ -21,34 +21,34 @@ Every existing order keeps its exact fills.
 **Files:** `crates/q-engine/tests/live_placeable_equivalence.rs` (new), fixtures under
 `fixtures/reference/candle_engine/` (new files only).
 
-- [ ] Write the three legacy forms of acceptance 2 against the current kernel, with fixture bars and ticks. Make
+- [x] Write the three legacy forms of acceptance 2 against the current kernel, with fixture bars and ticks. Make
   them include a same-bar exit, a gap open and an exact touch of a level. Record their ledgers as the expected
   output.
-- [ ] Add the new forms as failing tests against those expected ledgers. Commit.
+- [x] Add the new forms as failing tests against those expected ledgers. Commit.
 
 ### 2. OCO groups
 
 **Files:** `crates/q-engine/src/candle/inputs.rs`, `decision.rs`, `run.rs`, `protective.rs` as needed,
 `crates/q-engine/tests/oco_groups_gate.rs` (new).
 
-- [ ] Write failing gates for the OCO cases in acceptance 3.
-- [ ] Generalise the single working entry to a group with first-fill cancellation, keeping the single resting
+- [x] Write failing gates for the OCO cases in acceptance 3.
+- [x] Generalise the single working entry to a group with first-fill cancellation, keeping the single resting
   entry as a group of one with identical fills. Apply the Q-132 rule to members.
-- [ ] Run all `q-engine` tests. Commit.
+- [x] Run all `q-engine` tests. Commit.
 
 ### 3. Timed orders and latency
 
 **Files:** the same `candle/` modules, `crates/q-engine/src/candle/session_ticks.rs`,
 `crates/q-engine/tests/timed_orders_gate.rs` (new).
 
-- [ ] Write failing gates for expiry by instant, the timed exit cases, and latency.
-- [ ] Implement them. With no instant and zero latency, the paths must be untouched. Commit.
+- [x] Write failing gates for expiry by instant, the timed exit cases, and latency.
+- [x] Implement them. With no instant and zero latency, the paths must be untouched. Commit.
 
 ### 4. Python surface
 
 **Files:** `crates/q-py/src/engine.rs`, `tests/` Python tests.
 
-- [ ] Expose the optional arguments. Add a test that a call without them returns byte-identical arrays to the
+- [x] Expose the optional arguments. Add a test that a call without them returns byte-identical arrays to the
   previous release on the reference fixtures. Commit.
 
 ## Verification

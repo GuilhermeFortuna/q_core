@@ -45,6 +45,7 @@ fn callback_sees_filled_positions_and_preserves_static_results() {
         exit_params: ExitParams::default(),
         day_trade: None,
         force_close_at_end: true,
+        latency_us: 0,
     };
     let expected = run_candle(&inputs, &config).unwrap();
     let mut seen = Vec::new();
@@ -109,6 +110,7 @@ fn callback_error_aborts_run() {
         exit_params: ExitParams::default(),
         day_trade: None,
         force_close_at_end: false,
+        latency_us: 0,
     };
     let result = run_candle_with_callback(&inputs, &config, |_, _| {
         Err::<BarSignals, _>(CandleError::InvalidConfig {
@@ -173,6 +175,7 @@ fn callback_observes_intrabar_closures_and_rejected_entries() {
         exit_params: ExitParams::default(),
         day_trade: None,
         force_close_at_end: false,
+        latency_us: 0,
     };
     let mut seen = Vec::new();
     let run = run_candle_with_callback(&inputs, &config, |bar, positions| {
@@ -229,6 +232,7 @@ fn callback_runs_on_warmup_force_close_and_final_bars() {
             force_close_us: 12 * HOUR,
         }),
         force_close_at_end: false,
+        latency_us: 0,
     };
     let mut seen = Vec::new();
     let run = run_candle_with_callback(&inputs, &config, |_, positions| {
@@ -279,6 +283,7 @@ fn callback_signals_are_validated_even_on_suppressed_bars() {
         exit_params: ExitParams::default(),
         day_trade: None,
         force_close_at_end: false,
+        latency_us: 0,
     };
     for signals in [
         BarSignals {
