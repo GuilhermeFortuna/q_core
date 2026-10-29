@@ -48,7 +48,7 @@ Every existing order keeps its exact fills.
 
 **Files:** `crates/q-py/src/engine.rs`, `tests/` Python tests.
 
-- [ ] Expose the optional arguments. Add a test that a call without them returns byte-identical arrays to the
+- [x] Expose the optional arguments. Add a test that a call without them returns byte-identical arrays to the
   previous release on the reference fixtures. Commit.
 
 ## Verification
