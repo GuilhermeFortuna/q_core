@@ -167,6 +167,7 @@ struct WorkingMember {
     levels: Levels,
     candidate_index: i64,
     placed_bar: usize,
+    earliest_fill_us: i64,
 }
 
 impl WorkingMember {
@@ -177,6 +178,10 @@ impl WorkingMember {
             .is_some_and(|bars| bar - self.placed_bar > bars)
     }
 
+    fn expired_at(&self, time_us: i64) -> bool {
+        self.order.expire_time_us.is_some_and(|exp| time_us >= exp)
+    }
+
     fn reached_by_range(&self, high: f64, low: f64) -> bool {
         self.order.reached_by_range(self.side, high, low)
     }
@@ -184,6 +189,13 @@ impl WorkingMember {
     fn fill_at(&self, price: f64) -> Option<f64> {
         self.order.fill_at(self.side, price)
     }
+}
+
+/// An active timed exit closing open positions at or after `target_time_us`.
+#[derive(Clone, Copy, Debug)]
+struct WorkingTimedExit {
+    target_time_us: i64,
+    earliest_fill_us: i64,
 }
 
 /// A working group of resting entry orders (either a single resting order or an OCO group).
@@ -496,6 +508,8 @@ fn entry_signals<E: From<CandleError>>(
         || signals.close_next_open
         || signals.amend_stop.is_some()
         || signals.amend_target.is_some()
+        || signals.timed_exit.is_some()
+        || signals.cancel_timed_exit
     {
         return Err(CandleError::InvalidSignal {
             column: "exit_long",
@@ -596,7 +610,13 @@ fn checked_signals<E: From<CandleError>>(
                 }
                 .into());
             }
+            if let Some(exp) = order.expire_time_us {
+                check_positive("expire_time_us", bar, exp as f64)?;
+            }
         }
+    }
+    if let Some(timed_exit) = signals.timed_exit {
+        check_positive("timed_exit", bar, timed_exit as f64)?;
     }
     if let Some(stop) = signals.amend_stop {
         check_positive("amend_stop", bar, stop)?;
@@ -684,6 +704,7 @@ where
     let mut queued_exempt: Option<usize> = None;
     let mut rejected = RejectedEntries::default();
     let mut working: Option<WorkingGroup> = None;
+    let mut working_timed_exit: Option<WorkingTimedExit> = None;
 
     let mut trace = DecisionTrace {
         exit_offsets: Vec::with_capacity(n + 1),
@@ -730,12 +751,42 @@ where
                 queued = Decision::default();
                 queued_exempt = None;
                 working = None;
+                working_timed_exit = None;
                 strategy_signals(&mut callbacks, bar, &trades, inputs)?;
                 entry_signals(&mut callbacks, bar, &trades, inputs)?;
             } else {
-                // B. The first queued close takes out every open trade under its own reason;
-                // the Python loop's later closes find nothing open on the symbol.
-                if let Some(first) = queued.exits.first() {
+                let mut timed_exit_first_trade = None;
+                let timed_exit_at_open = working_timed_exit.is_some_and(|exit| {
+                    let first_trade_time = match inputs.intrabar {
+                        Some(source) => intrabar_prices::<E>(source, bar)
+                            .ok()
+                            .and_then(|p| p.time_us.first().copied())
+                            .unwrap_or(times[bar]),
+                        None => times[bar],
+                    };
+                    if first_trade_time >= exit.target_time_us
+                        && first_trade_time >= exit.earliest_fill_us
+                    {
+                        timed_exit_first_trade = Some(first_trade_time);
+                        true
+                    } else {
+                        false
+                    }
+                });
+                if timed_exit_at_open {
+                    let first_trade_time = timed_exit_first_trade.unwrap_or(times[bar]);
+                    working_timed_exit = None;
+                    for (index, trade) in trades.iter_mut().enumerate() {
+                        if !trade.open || Some(index) == queued_exempt {
+                            continue;
+                        }
+                        let pnl = close_trade(trade, bar, fill, ExitReason::Signal, config);
+                        trade.exit_time_us = first_trade_time;
+                        capital += pnl;
+                    }
+                } else if let Some(first) = queued.exits.first() {
+                    // B. The first queued close takes out every open trade under its own reason;
+                    // the Python loop's later closes find nothing open on the symbol.
                     let reason = first.rule.map_or(ExitReason::Signal, ExitReason::Rule);
                     close_all(
                         &mut trades,
@@ -773,6 +824,7 @@ where
                 let mut last_exit_tick = intrabar_fills(
                     &mut trades,
                     &mut working,
+                    &mut working_timed_exit,
                     &mut rejected,
                     bar,
                     inputs,
@@ -875,6 +927,8 @@ where
                         .into());
                     }
                     queued.entry = None;
+                    let earliest_fill_us =
+                        times.get(bar + 1).copied().unwrap_or(times[bar]) + config.latency_us;
                     working = Some(WorkingGroup {
                         members: vec![WorkingMember {
                             side: entry.side,
@@ -883,6 +937,7 @@ where
                             levels: queued_levels,
                             candidate_index: -1,
                             placed_bar: bar,
+                            earliest_fill_us,
                         }],
                     });
                 }
@@ -897,6 +952,8 @@ where
                         }
                         .into());
                     }
+                    let earliest_fill_us =
+                        times.get(bar + 1).copied().unwrap_or(times[bar]) + config.latency_us;
                     let default_strength = runtime_signals.as_ref().map_or(1.0, |s| s.strength);
                     let mut members = Vec::with_capacity(orders.len());
                     for (index, order) in orders.iter().enumerate() {
@@ -916,9 +973,27 @@ where
                             levels,
                             candidate_index: index as i64,
                             placed_bar: bar,
+                            earliest_fill_us,
                         });
                     }
                     working = Some(WorkingGroup { members });
+                }
+                if runtime_signals
+                    .as_ref()
+                    .is_some_and(|signals| signals.cancel_timed_exit)
+                {
+                    working_timed_exit = None;
+                }
+                if let Some(target_time_us) = runtime_signals
+                    .as_ref()
+                    .and_then(|signals| signals.timed_exit)
+                {
+                    let earliest_fill_us =
+                        times.get(bar + 1).copied().unwrap_or(times[bar]) + config.latency_us;
+                    working_timed_exit = Some(WorkingTimedExit {
+                        target_time_us,
+                        earliest_fill_us,
+                    });
                 }
                 // A priced entry fills on this bar, so it is never queued for the next one.
                 if let Some(entry) = decided.entry.filter(|_| resting.is_none()) {
@@ -980,6 +1055,7 @@ where
                     queued = Decision::default();
                     queued_exempt = None;
                     working = None;
+                    working_timed_exit = None;
                 }
             }
         } else {
@@ -1040,6 +1116,7 @@ where
 fn intrabar_fills(
     trades: &mut Vec<Trade>,
     working: &mut Option<WorkingGroup>,
+    working_timed_exit: &mut Option<WorkingTimedExit>,
     rejected: &mut RejectedEntries,
     bar: usize,
     inputs: &CandleInputs<'_>,
@@ -1062,7 +1139,8 @@ fn intrabar_fills(
     let order_reached = working
         .as_ref()
         .is_some_and(|group| group.reached_by_range(high, low));
-    if !order_reached && !reached.contains(&true) {
+    let timed_exit_active = working_timed_exit.is_some() && any_open;
+    if !order_reached && !reached.contains(&true) && !timed_exit_active {
         return Ok(None);
     }
 
@@ -1071,15 +1149,22 @@ fn intrabar_fills(
     let mut open_trades: Vec<Trade> = trades.iter().filter(|trade| trade.open).cloned().collect();
     let mut intrabar_exit_tick: Option<usize> = None;
     if !open_trades.is_empty() {
-        for (tick, &price) in prices.price.iter().enumerate() {
+        for (tick, (&time_us, &price)) in prices.time_us.iter().zip(&prices.price).enumerate() {
+            let timed_exit_fires = working_timed_exit.is_some_and(|exit| {
+                time_us >= exit.target_time_us && time_us >= exit.earliest_fill_us
+            });
+            let mut any_exited = false;
             for trade in open_trades.iter_mut() {
                 if trade.open
                     && !trade.skips_tick(bar, tick)
-                    && trigger_price(trade, price, config).is_some()
+                    && (trigger_price(trade, price, config).is_some() || timed_exit_fires)
                 {
                     trade.open = false;
-                    intrabar_exit_tick = Some(tick);
+                    any_exited = true;
                 }
+            }
+            if any_exited {
+                intrabar_exit_tick = Some(tick);
             }
         }
     }
@@ -1099,6 +1184,21 @@ fn intrabar_fills(
             last_exit_tick = Some(tick);
         }
 
+        let timed_exit_fires = working_timed_exit
+            .is_some_and(|exit| time_us >= exit.target_time_us && time_us >= exit.earliest_fill_us);
+        if timed_exit_fires && trades.iter().any(|trade| trade.open) {
+            working_timed_exit.take();
+            for trade in trades.iter_mut() {
+                if !trade.open || trade.skips_tick(bar, tick) {
+                    continue;
+                }
+                let pnl = close_trade(trade, bar, price, ExitReason::Signal, config);
+                trade.exit_time_us = time_us;
+                *capital += pnl;
+                last_exit_tick = Some(tick);
+            }
+        }
+
         let open_now = trades.iter().any(|trade| trade.open);
         if !open_now && !(order_reached && working.is_some()) {
             break;
@@ -1108,32 +1208,39 @@ fn intrabar_fills(
         // fill only from a trade at or after that exit.
         let allowed_by_exit = intrabar_exit_tick.is_none_or(|exit_tick| tick >= exit_tick);
         if order_reached && allowed_by_exit {
-            if let Some(group) = working.as_ref() {
-                let filled = group
-                    .members
-                    .iter()
-                    .find_map(|member| member.fill_at(price).map(|fill| (*member, fill)));
-                if let Some((member, fill)) = filled {
-                    let _ = working.take();
-                    let kind = match member.order.kind {
-                        RestingKind::Stop => EntryKind::Stop,
-                        RestingKind::Limit => EntryKind::Limit,
-                    };
-                    let opening = Opening {
-                        kind,
-                        levels: member.levels,
-                        time_us,
-                        tick,
-                    };
-                    let entry = QueuedEntry {
-                        side: member.side,
-                        strength: member.strength,
-                    };
-                    if let Some(index) = open_entry(
-                        trades, rejected, bar, fill, entry, opening, inputs, config, *capital,
-                    ) {
-                        trades[index].entry_candidate = member.candidate_index;
-                        reached.push(reached_by_range(&trades[index], high, low, config));
+            if let Some(group) = working.as_mut() {
+                group.members.retain(|m| !m.expired_at(time_us));
+                if group.members.is_empty() {
+                    *working = None;
+                } else {
+                    let filled = group.members.iter().find_map(|member| {
+                        if time_us < member.earliest_fill_us {
+                            return None;
+                        }
+                        member.fill_at(price).map(|fill| (*member, fill))
+                    });
+                    if let Some((member, fill)) = filled {
+                        let _ = working.take();
+                        let kind = match member.order.kind {
+                            RestingKind::Stop => EntryKind::Stop,
+                            RestingKind::Limit => EntryKind::Limit,
+                        };
+                        let opening = Opening {
+                            kind,
+                            levels: member.levels,
+                            time_us,
+                            tick,
+                        };
+                        let entry = QueuedEntry {
+                            side: member.side,
+                            strength: member.strength,
+                        };
+                        if let Some(index) = open_entry(
+                            trades, rejected, bar, fill, entry, opening, inputs, config, *capital,
+                        ) {
+                            trades[index].entry_candidate = member.candidate_index;
+                            reached.push(reached_by_range(&trades[index], high, low, config));
+                        }
                     }
                 }
             }
@@ -1638,6 +1745,9 @@ fn check_resting(signals: &BarSignals, order: RestingOrder, bar: usize) -> Resul
             reason: "must be a positive integer",
         });
     }
+    if let Some(exp) = order.expire_time_us {
+        check_positive("expire_time_us", bar, exp as f64)?;
+    }
     Ok(())
 }
 
@@ -1665,6 +1775,12 @@ fn check_level(column: &'static str, bar: usize, level: f64) -> Result<(), Candl
 
 fn validate(inputs: &CandleInputs<'_>, config: &CandleConfig) -> Result<(), CandleError> {
     config.sizing.validate()?;
+    if config.latency_us < 0 {
+        return Err(CandleError::InvalidConfig {
+            field: "latency_us",
+            reason: "must be non-negative".to_string(),
+        });
+    }
     let params = &config.exit_params;
     if params.intrabar_breakeven() {
         if !intrabar_ready(inputs) {

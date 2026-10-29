@@ -41,8 +41,8 @@ Every existing order keeps its exact fills.
 **Files:** the same `candle/` modules, `crates/q-engine/src/candle/session_ticks.rs`,
 `crates/q-engine/tests/timed_orders_gate.rs` (new).
 
-- [ ] Write failing gates for expiry by instant, the timed exit cases, and latency.
-- [ ] Implement them. With no instant and zero latency, the paths must be untouched. Commit.
+- [x] Write failing gates for expiry by instant, the timed exit cases, and latency.
+- [x] Implement them. With no instant and zero latency, the paths must be untouched. Commit.
 
 ### 4. Python surface
 
