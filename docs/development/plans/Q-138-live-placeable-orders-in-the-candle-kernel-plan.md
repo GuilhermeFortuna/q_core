@@ -21,10 +21,10 @@ Every existing order keeps its exact fills.
 **Files:** `crates/q-engine/tests/live_placeable_equivalence.rs` (new), fixtures under
 `fixtures/reference/candle_engine/` (new files only).
 
-- [ ] Write the three legacy forms of acceptance 2 against the current kernel, with fixture bars and ticks. Make
+- [x] Write the three legacy forms of acceptance 2 against the current kernel, with fixture bars and ticks. Make
   them include a same-bar exit, a gap open and an exact touch of a level. Record their ledgers as the expected
   output.
-- [ ] Add the new forms as failing tests against those expected ledgers. Commit.
+- [x] Add the new forms as failing tests against those expected ledgers. Commit.
 
 ### 2. OCO groups
 

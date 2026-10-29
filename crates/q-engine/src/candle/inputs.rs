@@ -9,6 +9,18 @@ pub struct EntryCandidate {
     pub levels: Option<(f64, f64)>,
 }
 
+/// One resting stop or limit member of an OCO group.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct OcoOrder {
+    pub side: Side,
+    pub kind: RestingKind,
+    pub price: f64,
+    /// Stop and target, `NaN` where unset. `None` takes the bar's `levels`.
+    pub levels: Option<(f64, f64)>,
+    pub expire_bars: Option<usize>,
+    pub expire_time_us: Option<i64>,
+}
+
 /// Strategy decisions for one closed bar, before engine gating and exit rules.
 #[derive(Clone, Debug, Default)]
 pub struct BarSignals {
@@ -26,6 +38,8 @@ pub struct BarSignals {
     pub resting: Option<RestingOrder>,
     /// Removes the working resting order without placing another.
     pub cancel_entry: bool,
+    /// Places an OCO group of resting entries instead of a single resting or market entry.
+    pub oco_group: Option<Vec<OcoOrder>>,
     /// Replaces the stop of every open trade the callback saw; `None` keeps it.
     pub amend_stop: Option<f64>,
     /// Replaces the target of every open trade the callback saw; `None` keeps it.
@@ -35,6 +49,10 @@ pub struct BarSignals {
     pub exit_prices: Vec<f64>,
     /// With `exit_prices`, the close also queues for the next open when none of them is reached.
     pub close_next_open: bool,
+    /// Instant at or after which a timed exit closes open positions on the first trade.
+    pub timed_exit: Option<i64>,
+    /// Cancels any active timed exit.
+    pub cancel_timed_exit: bool,
 }
 
 impl BarSignals {
@@ -48,10 +66,13 @@ impl BarSignals {
             entry_candidates: None,
             resting: None,
             cancel_entry: false,
+            oco_group: None,
             amend_stop: None,
             amend_target: None,
             exit_prices: Vec::new(),
             close_next_open: false,
+            timed_exit: None,
+            cancel_timed_exit: false,
         }
     }
 }
@@ -68,7 +89,7 @@ pub struct SignalColumns<'a> {
     pub bar_index: Option<&'a [i64]>,
 }
 
-use super::protective::{IntrabarSource, ProtectiveColumns, RestingOrder};
+use super::protective::{IntrabarSource, ProtectiveColumns, RestingKind, RestingOrder};
 use crate::exits::Side;
 
 /// Every column one run reads.

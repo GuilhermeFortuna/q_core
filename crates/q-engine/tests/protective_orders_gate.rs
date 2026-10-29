@@ -255,6 +255,7 @@ impl Scenario {
             exit_params: ExitParams::default(),
             day_trade,
             force_close_at_end: false,
+            latency_us: 0,
         }
     }
 

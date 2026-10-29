@@ -210,6 +210,7 @@ fn config(sizing: Sizing) -> CandleConfig {
         exit_params: ExitParams::default(),
         day_trade: None,
         force_close_at_end: false,
+        latency_us: 0,
     }
 }
 

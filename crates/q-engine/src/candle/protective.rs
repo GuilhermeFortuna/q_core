@@ -150,11 +150,13 @@ pub enum RestingKind {
 
 /// A resting entry order placed by one decision. `expire_bars` counts the bars after the placing
 /// bar on which the order can still fill; `None` keeps it until it fills, is replaced or cancelled.
+/// `expire_time_us` cancels the order if unfilled at that instant.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct RestingOrder {
     pub kind: RestingKind,
     pub price: f64,
     pub expire_bars: Option<usize>,
+    pub expire_time_us: Option<i64>,
 }
 
 impl RestingOrder {

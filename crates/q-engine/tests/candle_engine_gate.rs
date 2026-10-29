@@ -290,6 +290,7 @@ impl Case {
                 .get("force_close_at_end")
                 .and_then(Value::as_bool)
                 .ok_or_else(|| "force_close_at_end must be a bool".to_string())?,
+            latency_us: 0,
         };
 
         let named = inputs

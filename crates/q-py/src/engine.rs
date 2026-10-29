@@ -623,6 +623,7 @@ fn py_run_candle<'py>(
             }
         }),
         force_close_at_end,
+        latency_us: 0,
     };
 
     // Host code can retain and mutate its numpy arrays; callback runs read owned copies.
@@ -1054,6 +1055,7 @@ fn decision_dict(dict: &Bound<'_, PyDict>, bar: usize) -> Result<BarSignals, Str
                     kind,
                     price: order_price,
                     expire_bars,
+                    expire_time_us: None,
                 }),
             )
         }
@@ -1111,6 +1113,9 @@ fn decision_dict(dict: &Bound<'_, PyDict>, bar: usize) -> Result<BarSignals, Str
         amend_target: amend("amend_target")?,
         exit_prices,
         close_next_open: flag("close_next_open")?,
+        oco_group: None,
+        timed_exit: None,
+        cancel_timed_exit: false,
     })
 }
 
