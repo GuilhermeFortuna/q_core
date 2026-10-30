@@ -198,6 +198,14 @@ struct WorkingTimedExit {
     earliest_fill_us: i64,
 }
 
+/// A timed exit belongs to the trades open when it was set: once an exit leaves none open, it
+/// is cleared, so it never closes a trade opened later.
+fn clear_timed_exit_when_flat(trades: &[Trade], working_timed_exit: &mut Option<WorkingTimedExit>) {
+    if !trades.iter().any(|trade| trade.open) {
+        *working_timed_exit = None;
+    }
+}
+
 /// A working group of resting entry orders (either a single resting order or an OCO group).
 #[derive(Clone, Debug)]
 struct WorkingGroup {
@@ -797,6 +805,7 @@ where
                         &mut capital,
                         queued_exempt,
                     );
+                    clear_timed_exit_when_flat(&trades, &mut working_timed_exit);
                 }
 
                 // C. Size and open the queued entry, unless the cap or its levels refuse it.
@@ -866,6 +875,9 @@ where
                         &mut capital,
                     )?;
                     immediate_exit = consumed && !signals.close_next_open;
+                    if exit_tick.is_some() {
+                        clear_timed_exit_when_flat(&trades, &mut working_timed_exit);
+                    }
                     last_exit_tick = match (last_exit_tick, exit_tick) {
                         (Some(a), Some(b)) => Some(a.max(b)),
                         (a, b) => a.or(b),
@@ -1182,6 +1194,9 @@ fn intrabar_fills(
             trade.exit_time_us = time_us;
             *capital += pnl;
             last_exit_tick = Some(tick);
+        }
+        if last_exit_tick == Some(tick) {
+            clear_timed_exit_when_flat(trades, working_timed_exit);
         }
 
         let timed_exit_fires = working_timed_exit
