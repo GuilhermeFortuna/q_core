@@ -5,7 +5,8 @@
 //! - timed exit filled intrabar at first trade at or after instant;
 //! - timed exit where instant is before/at bar open (fills at bar open);
 //! - a timed exit on a bar without a trade after the instant (fills on next bar's first trade);
-//! - a non-zero latency that skips trades before close plus latency.
+//! - a non-zero latency that skips trades before close plus latency;
+//! - a timed exit set for a trade that stops out first never closes a later trade.
 
 use std::collections::BTreeMap;
 
@@ -362,4 +363,70 @@ fn placement_latency_skips_trades_before_close_plus_latency() {
     assert_eq!(result.trades.entry_bar, vec![1]);
     assert_eq!(result.trades.entry_price, vec![104.5]);
     assert_eq!(result.trades.entry_time_us, vec![11 * HOUR + 45 * SECOND]);
+}
+
+#[test]
+fn timed_exit_ends_with_the_trade_it_was_set_for() {
+    // Trade 1 opens at 10:10 with a stop at 99 and sets a 10:45 timed exit on its first bar.
+    // It stops out at 10:20; trade 2 opens at 10:30 without a timed exit and must not close at 10:46.
+    let minutes = |m: i64| 10 * HOUR + m * MINUTE;
+    let fixture = Fixture {
+        time_us: vec![minutes(0), minutes(10), minutes(20), minutes(30)],
+        open: vec![100.0, 100.0, 100.0, 100.0],
+        high: vec![100.0, 100.0, 100.0, 102.0],
+        low: vec![100.0, 100.0, 98.0, 100.0],
+        close: vec![100.0, 100.0, 100.0, 102.0],
+        tape: TestTape::new(&[
+            (0, &[(minutes(0), 100.0)]),
+            (1, &[(minutes(10), 100.0)]),
+            (2, &[(minutes(20), 98.0), (minutes(21), 100.0)]),
+            (
+                3,
+                &[
+                    (minutes(30), 100.0),
+                    (minutes(46), 101.0),
+                    (minutes(50), 102.0),
+                ],
+            ),
+        ]),
+        latency_us: 0,
+    };
+
+    let result = fixture.run(
+        Box::new(move |bar, positions| match bar {
+            1 if !positions.is_empty() => Ok(BarSignals {
+                timed_exit: Some(minutes(45)),
+                ..BarSignals::default()
+            }),
+            _ => Ok(BarSignals::default()),
+        }),
+        Some(Box::new(|bar, _positions| match bar {
+            0 => Ok(BarSignals {
+                entry: 1,
+                strength: 1.0,
+                levels: Some((99.0, f64::NAN)),
+                ..BarSignals::default()
+            }),
+            2 => Ok(BarSignals {
+                entry: 1,
+                strength: 1.0,
+                ..BarSignals::default()
+            }),
+            _ => Ok(BarSignals::default()),
+        })),
+    );
+
+    assert_eq!(result.trades.exit_reason[0], ExitReason::StopLoss.code());
+    assert_eq!(result.trades.exit_time_us[0], minutes(20));
+    let later_timed_exit = result
+        .trades
+        .exit_time_us
+        .iter()
+        .skip(1)
+        .any(|&time| time == minutes(46));
+    assert!(
+        !later_timed_exit,
+        "trade 2 closed by trade 1's timed exit: {:?}",
+        result.trades
+    );
 }
