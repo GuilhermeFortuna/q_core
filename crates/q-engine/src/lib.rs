@@ -5,6 +5,7 @@
 //! by research backtesting and live evaluation paths.
 
 pub mod candle;
+pub mod execution;
 pub mod exits;
 pub mod tick;
 

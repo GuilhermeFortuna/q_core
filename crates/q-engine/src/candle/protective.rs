@@ -5,6 +5,7 @@
 
 use std::cmp::Ordering;
 
+use crate::execution::{trade_fill, OrderSide};
 use crate::exits::Side;
 
 use super::run::ExitReason;
@@ -173,12 +174,11 @@ impl RestingOrder {
     /// The fill one trade price gives. A stop fills at the first price at or beyond it, at that
     /// price; a limit fills at its own price once a trade prints strictly beyond it.
     pub(crate) fn fill_at(self, side: Side, price: f64) -> Option<f64> {
-        match (side, self.kind) {
-            (Side::Long, RestingKind::Stop) => (price >= self.price).then_some(price),
-            (Side::Long, RestingKind::Limit) => (price < self.price).then_some(self.price),
-            (Side::Short, RestingKind::Stop) => (price <= self.price).then_some(price),
-            (Side::Short, RestingKind::Limit) => (price > self.price).then_some(self.price),
-        }
+        let order_side = match side {
+            Side::Long => OrderSide::Buy,
+            Side::Short => OrderSide::Sell,
+        };
+        trade_fill(order_side, self.kind, self.price, price)
     }
 }
 

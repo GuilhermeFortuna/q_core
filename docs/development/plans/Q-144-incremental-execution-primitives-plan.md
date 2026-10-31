@@ -38,9 +38,9 @@ existing side types and cost arithmetic where compatible. q-py consumes these fu
 - [ ] Write failing table-driven tests for acceptance 1–3: exact touch, both gap directions, a limit with
   improvement, slippage, fees, bounds and repeated calls. Preserve quote/trade distinction explicitly.
 - [ ] Run `cargo test -p q-engine --test incremental_execution` and confirm failures identify the missing API.
-- [ ] Implement the primitives and extract equivalent comparisons/pricing from the existing engines. Keep
+- [x] Implement the primitives and extract equivalent comparisons/pricing from the existing engines. Keep
   old public entry points and result structures intact; add validated decimal conversions and cost output.
-- [ ] Run `cargo test -p q-engine` (the affected numerical crate), plus `cargo fmt --all -- --check` and
+- [x] Run `cargo test -p q-engine` (the affected numerical crate), plus `cargo fmt --all -- --check` and
   `cargo clippy -p q-engine --all-targets -- -D warnings`. Commit the implementation and tests.
 
 ### 2. Python boundary and capability
@@ -51,12 +51,12 @@ affected Cargo dependency manifests/lockfile if a decimal dependency is needed, 
 **Interfaces:** consumes step 1; exports the exact `q_core.execution` functions and capability from the spec.
 
 - [ ] Write failing Python fixture tests for every numerical vector, decimal conversion, exceptions and capability.
-- [ ] Build with the documented maturin invocation (`maturin build --release --manifest-path
+- [x] Build with the documented maturin invocation (`maturin build --release --manifest-path
   crates/q-py/Cargo.toml --out /mnt/build/wheels/q-144`) and link worktree `dist` to that wheel directory.
   Do not use `make wheel` here: its removal of `dist` would remove the link. Keep temporary test environments
   on the build disk with `TMPDIR=/mnt/build/tmp/q-144`. Implement the thin wrappers, run
   `python3 tests/test_incremental_execution.py`, `python3 tests/test_tick_engine.py` and
   `python3 tests/test_engine.py` through their existing wheel-test harness pattern.
-- [ ] Run format and lint for q-py and Python files touched; document price models, units, rounding and examples.
+- [x] Run format and lint for q-py and Python files touched; document price models, units, rounding and examples.
 - [ ] Commit; report the actual focused commands/results through `./work board set Q-144 in-review -m "…"`.
   Do not release or push. Human `./work finish Q-144` releases the capability required by Q-145.

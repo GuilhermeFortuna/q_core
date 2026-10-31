@@ -92,4 +92,30 @@ mod tests {
             0x4008_18e2_1965_2bd4
         );
     }
+
+    #[test]
+    fn exact_fill_cost_matches_research_side_cost_within_float_precision() {
+        use crate::execution::{fill_cost, FillCost};
+        use rust_decimal::Decimal;
+
+        let costs = Costs {
+            per_contract: 1.25,
+            bps: 3.0,
+        };
+        // 2 contracts at 500.25 with point value 0.2 and 3 bps, as the research model charges.
+        let research = side_cost(Some(costs), 500.25, 2.0, 0.2);
+        let exact = fill_cost(&FillCost {
+            quantity_steps: 2,
+            volume_step: Decimal::ONE,
+            price_ticks: 50_025,
+            tick_size: Decimal::new(1, 2),
+            point_value: Decimal::new(2, 1),
+            cost_per_contract: Decimal::new(125, 2),
+            cost_bps: Decimal::from(3),
+            currency_decimals: 28,
+        })
+        .unwrap();
+        let exact: f64 = exact.to_string().parse().unwrap();
+        assert!((research - exact).abs() < 1e-9, "{research} vs {exact}");
+    }
 }
