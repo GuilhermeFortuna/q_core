@@ -1,5 +1,8 @@
 //! Single-position tick simulation (port of `_simulate_njit` / `_compute_quantity`).
 
+use crate::candle::RestingKind;
+use crate::execution::{quote_price, quote_reaches, OrderSide};
+
 /// Position sizing for the tick kernel.
 #[derive(Clone, Copy, Debug)]
 pub enum TickSizing {
@@ -107,10 +110,11 @@ pub fn simulate_ticks(
                 if qty > 0.0 {
                     if sig > 0 {
                         position_dir = 1;
-                        pos_entry_price = inputs.ask[i];
+                        pos_entry_price = quote_price(OrderSide::Buy, inputs.bid[i], inputs.ask[i]);
                     } else {
                         position_dir = -1;
-                        pos_entry_price = inputs.bid[i];
+                        pos_entry_price =
+                            quote_price(OrderSide::Sell, inputs.bid[i], inputs.ask[i]);
                     }
 
                     pos_entry_idx = i as i64;
@@ -140,32 +144,29 @@ pub fn simulate_ticks(
         } else {
             let mut exited = false;
             let mut reason = 0_i64;
-            let fill_price;
-
-            if position_dir > 0 {
-                fill_price = inputs.bid[i];
-                if has_sl && inputs.bid[i] <= sl_price {
-                    reason = TickExitReason::StopLoss as i64;
-                    exited = true;
-                } else if has_tp && inputs.bid[i] >= tp_price {
-                    reason = TickExitReason::TakeProfit as i64;
-                    exited = true;
-                } else if inputs.direction[i] < 0 {
-                    reason = TickExitReason::Signal as i64;
-                    exited = true;
-                }
+            // A long closes with a sell at the bid and a short with a buy at the ask.
+            let closing = if position_dir > 0 {
+                OrderSide::Sell
             } else {
-                fill_price = inputs.ask[i];
-                if has_sl && inputs.ask[i] >= sl_price {
-                    reason = TickExitReason::StopLoss as i64;
-                    exited = true;
-                } else if has_tp && inputs.ask[i] <= tp_price {
-                    reason = TickExitReason::TakeProfit as i64;
-                    exited = true;
-                } else if inputs.direction[i] > 0 {
-                    reason = TickExitReason::Signal as i64;
-                    exited = true;
-                }
+                OrderSide::Buy
+            };
+            let quote = quote_price(closing, inputs.bid[i], inputs.ask[i]);
+            let fill_price = quote;
+            let signal = if position_dir > 0 {
+                inputs.direction[i] < 0
+            } else {
+                inputs.direction[i] > 0
+            };
+
+            if has_sl && quote_reaches(closing, RestingKind::Stop, sl_price, quote) {
+                reason = TickExitReason::StopLoss as i64;
+                exited = true;
+            } else if has_tp && quote_reaches(closing, RestingKind::Limit, tp_price, quote) {
+                reason = TickExitReason::TakeProfit as i64;
+                exited = true;
+            } else if signal {
+                reason = TickExitReason::Signal as i64;
+                exited = true;
             }
 
             if exited {

@@ -8,6 +8,7 @@ authors.workspace = true
 [dependencies]
 q-indicators = { path = "../q-indicators" }
 q-buffers = { path = "../q-buffers" }
+rust_decimal = "1.43.0"
 
 [dev-dependencies]
 q-parity = { path = "../q-parity" }
