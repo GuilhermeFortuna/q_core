@@ -221,6 +221,52 @@ is replaced or is cancelled. Resting orders require `intrabar`, `open`, `high` a
   `final_stop_price` and `final_target_price`, the levels in force when the trade closed. With
   `snapshot_levels=True`, each position tuple also carries the trade's current stop and target.
 
+## Incremental execution primitives (`q-engine::execution`)
+
+`q_engine::execution` and `q_core.execution` match one order against one observed market event, and
+compute the currency fee of one fill. They are stateless: the caller owns orders, accounts, queues,
+clocks, expiry, OCO and activation. The capability is advertised as
+`q_core.execution.INCREMENTAL_EXECUTION == 1`.
+
+Units: prices are positive integer ticks, quantities are non-negative integer volume steps, and
+decimal metadata (`volume_step`, `tick_size`, `point_value`, rates, fees) is an exact decimal string.
+Floats are never accepted for decimal arguments.
+
+- `match_quote(*, side, kind, level_ticks, bid_ticks, ask_ticks, slippage_ticks=0) -> int | None`.
+  `side` is `"buy"` or `"sell"`; `kind` is `"market"`, `"stop"` or `"limit"`. A market order takes
+  `level_ticks=None`; a stop or limit needs a positive level. A quote is valid when `0 < bid <= ask`.
+  Buys trade at the ask and sells at the bid. A buy stop triggers when `ask >= level`, a sell stop
+  when `bid <= level`, and a triggered stop fills as a market order. A buy limit is executable when
+  `ask <= level` and a sell limit when `bid >= level`; each fills at the executable quote, so it can
+  improve on its level. Adverse `slippage_ticks` (non-negative) applies to market and stop fills only.
+- `match_trade(*, side, kind, level_ticks, trade_ticks) -> int | None`. The candle resting-order rule
+  on one trade price: a stop (`"stop"` or `"limit"` only) fills at the trade when it is at or beyond
+  its level; a limit fills at its level once a trade is strictly beyond it. An equal print does not
+  fill a limit.
+- `fill_cost(*, quantity_steps, volume_step, price_ticks, tick_size, point_value, cost_per_contract,
+  cost_bps, currency_decimals) -> str`. Quantity is `quantity_steps * volume_step` contracts and price
+  is `price_ticks * tick_size`. The fee is `quantity * cost_per_contract +
+  |quantity * price * point_value| * cost_bps / 10000`. Every product and sum is exact; the total is
+  rounded once, half-to-even, to `currency_decimals` places (0 to 28), and returned padded to that
+  many places (for example `"0.0420"`).
+- `price_to_ticks(*, price, tick_size) -> int` converts a decimal price to ticks. It rejects a price
+  that is not an exact multiple of `tick_size`.
+
+Errors: invalid values (bad side, kind, quote, level, sign, or a fill that slippage makes
+nonpositive; a non-exact decimal string; a price off the grid) raise `ValueError`. Results or
+integers outside the native range, including arithmetic that Decimal cannot represent exactly, raise
+`OverflowError`. Wrong Python types raise `TypeError`. Each function is pure: repeated calls with the
+same arguments return the same result.
+
+Model differences are explicit and not unified. `match_quote` is the quote model and `match_trade` is
+the trade model. With ask and bid at 100, a buy limit at 100 fills under the quote model; a trade
+printing at 100 does not fill it under the trade model.
+
+Shared helpers keep the existing paths unchanged. The candle kernel's resting-order fill and the tick
+kernel's exit and entry comparisons call the same helpers, and their golden tests are unchanged. The
+research fee `candle::config::side_cost` stays an unrounded f64 model, so `fill_cost` is a separate
+exact currency fee. A test checks that the two agree within float precision.
+
 ## Crate Responsibilities
 
 ### Intrabar Breakeven Stop
