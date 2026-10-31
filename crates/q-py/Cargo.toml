@@ -16,6 +16,7 @@ q-engine = { path = "../q-engine" }
 q-io = { path = "../q-io" }
 q-buffers = { path = "../q-buffers" }
 q-indicators = { path = "../q-indicators" }
+rust_decimal = "1.43.0"
 
 [lints]
 workspace = true

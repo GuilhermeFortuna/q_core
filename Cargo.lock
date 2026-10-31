@@ -1911,6 +1911,7 @@ dependencies = [
  "q-engine",
  "q-indicators",
  "q-io",
+ "rust_decimal",
 ]
 
 [[package]]

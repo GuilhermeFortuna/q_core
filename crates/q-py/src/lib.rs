@@ -1,4 +1,5 @@
 mod engine;
+mod execution;
 mod indicators;
 
 use pyo3::prelude::*;
@@ -25,5 +26,6 @@ fn q_core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     indicators::register(m)?;
     frame::register(m)?;
     engine::register(m)?;
+    execution::register(m)?;
     Ok(())
 }
